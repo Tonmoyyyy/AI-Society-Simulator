@@ -21,6 +21,8 @@ from app.models import post  # noqa: F401
 from app.models import comment  # noqa: F401
 from app.models import reaction  # noqa: F401
 from app.models import follow  # noqa: F401
+from app.models import wallet  # noqa: F401
+from app.models import transaction  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

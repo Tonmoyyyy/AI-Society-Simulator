@@ -84,7 +84,7 @@ def test_all_actions_registered():
 
 def test_trigger_tick_requires_auth(client):
     resp = client.post("/api/v1/simulation/tick")
-    assert resp.status_code == 401
+    assert resp.status_code == 403  # HTTPBearer: no Authorization header at all
 
 
 def test_trigger_tick_processes_all_citizens(client):
@@ -169,5 +169,6 @@ def test_scheduler_status_defaults_to_not_running(client):
 
 
 def test_scheduler_start_stop_requires_auth(client):
-    assert client.post("/api/v1/simulation/scheduler/start").status_code == 401
-    assert client.post("/api/v1/simulation/scheduler/stop").status_code == 401
+    # HTTPBearer: no Authorization header at all → 403
+    assert client.post("/api/v1/simulation/scheduler/start").status_code == 403
+    assert client.post("/api/v1/simulation/scheduler/stop").status_code == 403

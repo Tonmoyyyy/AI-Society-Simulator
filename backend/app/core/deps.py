@@ -8,7 +8,7 @@ from app.core import security
 from app.db.session import SessionLocal
 from app.models.user import User
 
-# OAuth2PasswordBearer এর বদলে HTTPBearer সিকিউরিটি স্কিম ব্যবহার করা হয়েছে
+# OAuth2PasswordBearer এর বদলে HTTPBearer সিকিউরিটি স্কিম ব্যবহার করা হয়েছে
 security_scheme = HTTPBearer()
 
 
@@ -35,7 +35,7 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    # HTTPAuthorizationCredentials থেকে আসল টোকেন বের করে নেওয়া হচ্ছে
+    # HTTPAuthorizationCredentials থেকে আসল টোকেন বের করে নেওয়া হচ্ছে
     token = credentials.credentials
 
     payload = security.decode_token(token)

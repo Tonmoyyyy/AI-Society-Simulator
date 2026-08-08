@@ -50,7 +50,10 @@ def test_login_unknown_email_rejected(client):
 
 def test_me_requires_token(client):
     resp = client.get("/api/v1/auth/me")
-    assert resp.status_code == 401
+    # HTTPBearer (not OAuth2PasswordBearer) returns 403 when no
+    # Authorization header is present at all; an invalid/expired token
+    # still gets 401 from our own credentials check (see test below).
+    assert resp.status_code == 403
 
 
 def test_me_returns_current_user_with_valid_token(client):

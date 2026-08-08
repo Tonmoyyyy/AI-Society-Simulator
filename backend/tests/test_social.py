@@ -54,7 +54,7 @@ def test_create_post_and_socialize_are_both_competitive():
 
 def test_create_post_requires_auth(client):
     resp = client.post("/api/v1/citizens/1/posts", json={"content": "hi"})
-    assert resp.status_code == 401
+    assert resp.status_code == 403  # HTTPBearer: no Authorization header at all
 
 
 def test_create_post_for_missing_citizen(client):
@@ -145,7 +145,7 @@ def test_comment_on_missing_post(client):
 
 def test_comment_requires_auth(client):
     resp = client.post("/api/v1/posts/1/comments", json={"citizen_id": 1, "content": "hi"})
-    assert resp.status_code == 401
+    assert resp.status_code == 403  # HTTPBearer: no Authorization header at all
 
 
 def test_list_comments_public(client):

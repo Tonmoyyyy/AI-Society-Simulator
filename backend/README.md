@@ -1,4 +1,4 @@
-# AI Society Simulator — Backend (Phase 1 + 2 + 3 + 4)
+# AI Society Simulator — Backend (Phase 1 + 2 + 3 + 4 + 5)
 
 **Phase 1** delivers: FastAPI scaffold, MySQL connection via SQLAlchemy, Alembic
 migrations, and a working JWT auth flow (signup / login / refresh / a
@@ -19,7 +19,13 @@ APScheduler background loop.
 engine's `create_post` action now writes a real `posts` row (with
 mood-derived template content) instead of just changing citizen state.
 
-No economy (wallets/salary) yet — that's Phase 5.
+**Phase 5** delivers: the economy — `wallets` and `transactions` tables, with
+every balance change going through one locked, atomic service method (never
+a bare `UPDATE balance`). The tick engine's `work` action now actually pays a
+job-based salary into the citizen's wallet.
+
+Milestone v0.1 core loop is now complete: citizens perceive → decide → act →
+earn → post → socialize, all through one tick engine.
 
 ## 1. Prerequisites
 
@@ -204,7 +210,62 @@ curl -X POST http://127.0.0.1:8000/api/v1/citizens/1/posts \
 curl http://127.0.0.1:8000/api/v1/feed
 ```
 
-## 9. Run tests
+## 10. Economy endpoints (Phase 5 scope)
+
+| Method | Path | Auth required | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/citizens/{citizen_id}/wallet` | No | Current balance (wallet auto-created with `0.00` on first read if it doesn't exist yet) |
+| GET | `/api/v1/citizens/{citizen_id}/transactions` | No | Transaction history, most recent first |
+| POST | `/api/v1/citizens/{citizen_id}/wallet/transfer` | Yes | `{"to_citizen_id": ..., "amount": ...}` — manual citizen-to-citizen transfer, mainly for testing/seeding |
+
+**How salary works:** the tick engine's `work` action (in `app/simulation/engine.py`)
+computes a salary via `app/simulation/salary.py` — a per-job base rate
+(engineer/doctor/nurse/etc., falling back to a default for unlisted jobs),
+adjusted ±25% by the citizen's `ambition` trait — and pays it into the
+citizen's wallet via `wallet_service.pay_salary`, in the same batch commit as
+the rest of the tick. There's no market/pricing system yet, so these are
+flat per-work-tick amounts, not a simulated labor market.
+
+**Atomicity — this is the part that actually matters:** every balance change
+goes through `wallet_service.pay_salary` or `wallet_service.transfer`, both
+of which write the new balance *and* a `transactions` row in one DB
+transaction, using `SELECT ... FOR UPDATE` row locking when called outside
+the tick engine's own transaction (a standalone API-triggered transfer). The
+tick engine's internal calls skip the extra lock — the whole tick is already
+one transaction — see the docstring in `wallet_service.pay_salary` for why
+that's safe here specifically.
+`transfer` additionally locks both wallets in a fixed (lowest-id-first)
+order, so two concurrent transfers between the same pair of citizens can't
+deadlock each other.
+
+**A concurrency bug we found and fixed:** the first version of
+`get_or_create_wallet` always committed internally when creating a new
+wallet — including when called from inside the tick engine's `commit=False`
+batch. That would have silently split a "tick" into multiple partial
+commits, defeating the whole point of batching. Fixed by threading `commit`
+through `get_or_create_wallet` → `wallet_repo.create_wallet`.
+
+**A validation-error bug we found and fixed:** sending an invalid `Decimal`
+value (e.g. a negative transfer `amount`) crashed the app with a bare `500`
+instead of a `422`, because our custom validation-error handler passed
+Pydantic's raw `exc.errors()` — which can contain a `Decimal` — straight into
+`JSONResponse`, and the plain `json` module can't serialize `Decimal`. Fixed
+by running it through FastAPI's `jsonable_encoder` first (see
+`app/core/error_handlers.py`). This bug would have affected *any* validation
+failure involving a `Decimal`/`Numeric` field, not just this endpoint — worth
+knowing if you add more money-typed fields later.
+`tests/test_wallet.py::test_transfer_negative_amount_rejected_cleanly` is the
+regression test for this.
+
+Example:
+```bash
+curl http://127.0.0.1:8000/api/v1/citizens/1/wallet
+curl -X POST http://127.0.0.1:8000/api/v1/citizens/1/wallet/transfer \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"to_citizen_id": 2, "amount": 25.00}'
+```
+
+## 11. Run tests
 
 ```bash
 python -m pytest tests/ -v
@@ -212,11 +273,12 @@ python -m pytest tests/ -v
 
 Tests run against an in-memory SQLite DB (not MySQL) so the suite has zero
 external dependencies. This works because the code sticks to portable
-SQLAlchemy types — the same models run against both engines. 57 tests total
-(10 auth, 14 citizens, 15 simulation, 18 social — including a WebSocket test
-using `TestClient.websocket_connect`), all passing.
+SQLAlchemy types — the same models run against both engines. 67 tests total
+(10 auth, 14 citizens, 15 simulation, 18 social, 10 wallet — including a
+WebSocket test and regression tests for both bugs described above), all
+passing.
 
-## What's in Phase 1 + 2 + 3 + 4
+## What's in Phase 1 + 2 + 3 + 4 + 5
 
 ```
 backend/
@@ -233,27 +295,41 @@ backend/
     models/
       user.py             → users table (int PK, per approved v0.1 corrections)
       citizen.py          → citizens table (no money column — see Phase 2 notes)
+      memory.py           → memories table (simplified v0.1 fields)
+      simulation_tick.py  → simulation_ticks table (tick history/observability)
+      post.py, comment.py, reaction.py, follow.py → the social graph tables
+      wallet.py           → wallets table (sole source of truth for citizen money)
+      transaction.py      → transactions table (immutable ledger row per balance change)
     schemas/               → Pydantic request/response models
     repositories/
       user_repo.py        → DB access only, no business rules
       citizen_repo.py     → DB access only, no business rules
+      memory_repo.py, simulation_tick_repo.py → DB access for Phase 3 tables
+      social_repo.py       → DB access for posts/comments/reactions/follows
+      wallet_repo.py        → DB access for wallets/transactions, incl. get_locked() row-lock helper
     services/
       auth_service.py     → signup/login/refresh business logic
       citizen_service.py  → citizen CRUD + v0.1 100-citizen cap enforcement
+      simulation_service.py → wraps engine.run_tick() + tick/memory queries for the API layer
+      social_service.py     → posts/comments/reactions/follows business rules + websocket broadcast
+      wallet_service.py     → atomic wallet mutations (pay_salary, transfer) — see Phase 5 notes
     simulation/
       personality.py      → personality_json generator (5 traits, 0-100)
       name_generator.py   → random name generator for auto-created citizens
       actions.py          → the v0.1 action catalog (sleep/eat/work/socialize/create_post): is_valid/utility/execute per action
       decision_pipeline.py → decide_and_act(citizen): the per-citizen perceive→score→select→execute loop
-      engine.py            → run_tick(db): orchestrates decide_and_act across all citizens, batches the commit, records the tick, writes real posts + broadcasts
+      engine.py            → run_tick(db): orchestrates decide_and_act across all citizens, batches the commit, records the tick, writes real posts + pays salaries + broadcasts
       post_content.py      → mood-derived template content for the create_post action
+      salary.py            → job-based salary calculation for the work action
     tasks/
       tick_scheduler.py    → APScheduler background loop calling engine.run_tick() on an interval
     websocket/
       connection_manager.py → realtime feed broadcast, thread-safe for both API handlers and the scheduler thread
+    api/v1/
+      auth.py, citizens.py, simulation.py, social.py, wallet.py → route handlers, one file per domain
     main.py                → FastAPI app entrypoint (lifespan-based startup, /ws/feed route)
   alembic/                 → migrations (wired to app.core.config + models)
-  tests/                   → pytest suite (57 tests, all passing)
+  tests/                   → pytest suite (67 tests, all passing)
   requirements.txt
   .env.example
 ```
@@ -263,15 +339,15 @@ the simulation engine (Phase 3+) reuse the same services without duplicating
 logic, and what makes a future MySQL → PostgreSQL move a config change
 rather than a rewrite.
 
-## Not in Phase 1 + 2 + 3 + 4 (by design)
+## Not in Phase 1 + 2 + 3 + 4 + 5 (by design)
 
-- No wallets/salary — `work` changes mood/happiness but doesn't pay anything yet (Phase 5)
 - No frontend yet (added once there's something to look at)
 - `role` is always `spectator` on signup — promoting a user to `admin` is a
   manual DB update for now; an admin-management endpoint isn't needed yet
-- Citizen/simulation/social write actions only require *any* logged-in user,
-  not specifically `admin` — flagging this as an assumption since the SDD
-  didn't specify; easy to tighten to `require_admin` later if you want that instead
+- Citizen/simulation/social/economy write actions only require *any*
+  logged-in user, not specifically `admin` — flagging this as an assumption
+  since the SDD didn't specify; easy to tighten to `require_admin` later if
+  you want that instead
 - Memory has no decay/sentiment scoring yet (per the approved v0.1
   simplification) — it's a flat importance-ranked log
 - No timeline/milestone-detector (SDD §9) yet — folding that into Phase 6
@@ -279,3 +355,8 @@ rather than a rewrite.
 - WebSocket broadcasts are best-effort and in-memory only (no Redis pub/sub
   — per the approved v0.1 stack) — fine for one server instance, won't fan
   out across multiple processes if you ever run more than one
+- No tax, borrowing, or business/company entities — citizens earn salary and
+  can be manually transferred money between each other, that's the whole
+  v0.1 economy
+- Salary amounts are flat per-job-per-work-tick rates, not a simulated labor
+  market — no unemployment benefits, no price inflation, no company payroll

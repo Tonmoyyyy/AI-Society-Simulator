@@ -45,7 +45,7 @@ def test_create_citizen_with_name_and_age(client):
 
 def test_create_citizen_requires_auth(client):
     resp = client.post("/api/v1/citizens", json={})
-    assert resp.status_code == 401
+    assert resp.status_code == 403  # HTTPBearer: no Authorization header at all
 
 
 def test_list_citizens_is_public(client):
@@ -114,7 +114,7 @@ def test_update_citizen_requires_auth(client):
     citizen_id = create_resp.json()["id"]
 
     resp = client.patch(f"/api/v1/citizens/{citizen_id}", json={"job": "hacker"})
-    assert resp.status_code == 401
+    assert resp.status_code == 403  # HTTPBearer: no Authorization header at all
 
 
 def test_update_nonexistent_citizen(client):
@@ -148,7 +148,7 @@ def test_delete_citizen_requires_auth(client):
     citizen_id = create_resp.json()["id"]
 
     resp = client.delete(f"/api/v1/citizens/{citizen_id}")
-    assert resp.status_code == 401
+    assert resp.status_code == 403  # HTTPBearer: no Authorization header at all
 
 
 def test_citizen_limit_enforced(client, monkeypatch):

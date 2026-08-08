@@ -12,6 +12,8 @@ from app.models.citizen import Citizen
 from app.repositories import memory_repo, simulation_tick_repo, social_repo
 from app.simulation.decision_pipeline import decide_and_act
 from app.simulation.post_content import generate_post_content
+from app.simulation.salary import calculate_salary
+from app.services import wallet_service
 from app.websocket.connection_manager import manager
 
 
@@ -41,6 +43,10 @@ def run_tick(db: Session) -> dict:
                 content = generate_post_content(citizen)
                 post = social_repo.create_post(db, citizen_id=citizen.id, content=content, commit=False)
                 new_posts.append((citizen.name, post))
+
+            if result is not None and result.memory_event == "worked":
+                salary = calculate_salary(citizen)
+                wallet_service.pay_salary(db, citizen.id, salary, commit=False)
 
             processed += 1
 
