@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.citizen import Citizen
 from app.repositories import memory_repo, simulation_tick_repo, social_repo
+from app.simulation import milestones
 from app.simulation.decision_pipeline import decide_and_act
 from app.simulation.post_content import generate_post_content
 from app.simulation.salary import calculate_salary
@@ -53,6 +54,14 @@ def run_tick(db: Session) -> dict:
         db.commit()  # one batch commit for the whole tick, not per-citizen
         simulation_tick_repo.finish_tick(db, tick, citizens_processed=processed, status="completed")
 
+        # Milestone detectors run against final post-tick state (population,
+        # richest citizen, average happiness) — see simulation/milestones.py.
+        # Committed separately since they depend on the tick's own commit
+        # having already landed (e.g. updated wallet balances).
+        new_milestones = milestones.run_all_detectors(db, tick.tick_number)
+        if new_milestones:
+            db.commit()
+
         # Broadcast only after the commit succeeds, so a WS client never
         # hears about a post that then gets rolled back.
         for citizen_name, post in new_posts:
@@ -63,6 +72,14 @@ def run_tick(db: Session) -> dict:
                 "citizen_id": post.citizen_id,
                 "citizen_name": citizen_name,
                 "content": post.content,
+            })
+        for event in new_milestones:
+            db.refresh(event)
+            manager.broadcast_threadsafe({
+                "type": "new_milestone",
+                "category": event.category,
+                "title": event.title,
+                "description": event.description,
             })
     except Exception:
         db.rollback()

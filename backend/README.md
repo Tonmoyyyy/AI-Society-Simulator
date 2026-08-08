@@ -1,4 +1,4 @@
-# AI Society Simulator — Backend (Phase 1 + 2 + 3 + 4 + 5)
+# AI Society Simulator — Backend (Phase 1 + 2 + 3 + 4 + 5 + 6)
 
 **Phase 1** delivers: FastAPI scaffold, MySQL connection via SQLAlchemy, Alembic
 migrations, and a working JWT auth flow (signup / login / refresh / a
@@ -24,8 +24,20 @@ every balance change going through one locked, atomic service method (never
 a bare `UPDATE balance`). The tick engine's `work` action now actually pays a
 job-based salary into the citizen's wallet.
 
-Milestone v0.1 core loop is now complete: citizens perceive → decide → act →
-earn → post → socialize, all through one tick engine.
+**Phase 6** delivers: the dashboard and Simulation Timeline (SDD §9) —
+aggregate stats, trending posts, and a `timeline_events` table populated by
+cheap post-tick "milestone detectors" (population thresholds, richest-
+citizen changes, happiness crises/recoveries), broadcast over the same
+WebSocket feed as posts.
+
+Milestone v0.1 core loop is now complete end-to-end: citizens perceive →
+decide → act → earn → post → socialize, with a live dashboard and history on
+top.
+
+Note: auth now uses `HTTPBearer` (not `OAuth2PasswordBearer`) in
+`app/core/deps.py` — a deliberate choice, kept as-is across phases; the
+`/docs` UI's Authorize flow and any client just need a raw Bearer token, not
+an OAuth2 form.
 
 ## 1. Prerequisites
 
@@ -265,20 +277,66 @@ curl -X POST http://127.0.0.1:8000/api/v1/citizens/1/wallet/transfer \
   -d '{"to_citizen_id": 2, "amount": 25.00}'
 ```
 
-## 11. Run tests
+## 11. Dashboard & Timeline endpoints (Phase 6 scope)
+
+| Method | Path | Auth required | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/dashboard/stats` | No | Population, average happiness/energy/health, employed/unemployed counts, total money in the economy, current richest citizen |
+| GET | `/api/v1/dashboard/trending?limit=5` | No | Most-engaged recent posts, ranked by `comments + reactions` |
+| GET | `/api/v1/timeline?category=...&page=1&page_size=20` | No | The Simulation Timeline (SDD §9) — milestone events, newest first, optionally filtered by `category` (`population`, `richest_citizen`, `happiness`) |
+
+**How the timeline gets populated:** after each tick's main batch commits,
+`app/simulation/milestones.py` runs a handful of cheap aggregate-query
+checks against the *current* state vs. what's already recorded in
+`timeline_events` — not a new simulation subsystem, just detection on top of
+data the other phases already produce (per SDD §9). Current detectors:
+- **Population milestones** — fires once each time citizen count crosses 10/25/50/75/100
+- **Richest-citizen changes** — fires only when the wealthiest citizen actually changes, not every tick
+- **Happiness crisis/recovery** — fires when average happiness drops below 30 (crisis) and again when it recovers to ≥50, not on every tick it stays low
+
+All three are deduplicated at the DB level (checked against existing
+`timeline_events` rows), verified live: running 8+ ticks with no state change
+produced exactly one event, not eight. New milestone events broadcast over
+`/ws/feed` as `{"type": "new_milestone", "category": ..., "title": ..., "description": ...}`.
+
+**A real bug we found and fixed here:** the app's `lifespan` startup now
+calls `Base.metadata.create_all(bind=engine)` as a dev-convenience safety net
+(added independently, alongside Alembic). This talks directly to the *real*
+MySQL engine — which the test suite's SQLite override does **not** patch
+(only the `get_db` dependency is patched, not the module-level `engine`
+object used at startup). Without a guard, this made the *entire app*
+(including every test) hard-crash with a connection error whenever MySQL
+wasn't running — which defeated the "tests need zero external dependencies"
+design documented below. Fixed by wrapping the `create_all` call in a
+try/except that logs and continues instead of raising — verified by running
+the full test suite with MySQL completely stopped (all 76 passed) and then
+again with MySQL running (still works, tables still auto-created when
+reachable).
+
+Example:
+```bash
+curl http://127.0.0.1:8000/api/v1/dashboard/stats
+curl http://127.0.0.1:8000/api/v1/dashboard/trending
+curl "http://127.0.0.1:8000/api/v1/timeline?category=richest_citizen"
+```
+
+## 12. Run tests
 
 ```bash
 python -m pytest tests/ -v
 ```
 
 Tests run against an in-memory SQLite DB (not MySQL) so the suite has zero
-external dependencies. This works because the code sticks to portable
-SQLAlchemy types — the same models run against both engines. 67 tests total
-(10 auth, 14 citizens, 15 simulation, 18 social, 10 wallet — including a
-WebSocket test and regression tests for both bugs described above), all
-passing.
+external dependencies — verified by running the full suite with MySQL
+completely stopped. This works because the code sticks to portable
+SQLAlchemy types (same models run against both engines) and because the
+`create_all` safety net in `main.py`'s lifespan degrades gracefully instead
+of crashing when MySQL isn't reachable (see Phase 6 notes above). 76 tests
+total (10 auth, 14 citizens, 15 simulation, 18 social, 10 wallet, 9
+dashboard/timeline — including a WebSocket test and regression tests for
+every bug described in this README), all passing.
 
-## What's in Phase 1 + 2 + 3 + 4 + 5
+## What's in Phase 1 + 2 + 3 + 4 + 5 + 6
 
 ```
 backend/
@@ -300,6 +358,7 @@ backend/
       post.py, comment.py, reaction.py, follow.py → the social graph tables
       wallet.py           → wallets table (sole source of truth for citizen money)
       transaction.py      → transactions table (immutable ledger row per balance change)
+      timeline_event.py   → timeline_events table (Simulation Timeline, SDD §9)
     schemas/               → Pydantic request/response models
     repositories/
       user_repo.py        → DB access only, no business rules
@@ -307,12 +366,14 @@ backend/
       memory_repo.py, simulation_tick_repo.py → DB access for Phase 3 tables
       social_repo.py       → DB access for posts/comments/reactions/follows
       wallet_repo.py        → DB access for wallets/transactions, incl. get_locked() row-lock helper
+      timeline_repo.py      → DB access for timeline_events, incl. dedup helpers (exists_with_title, get_latest_by_category)
     services/
       auth_service.py     → signup/login/refresh business logic
       citizen_service.py  → citizen CRUD + v0.1 100-citizen cap enforcement
       simulation_service.py → wraps engine.run_tick() + tick/memory queries for the API layer
       social_service.py     → posts/comments/reactions/follows business rules + websocket broadcast
       wallet_service.py     → atomic wallet mutations (pay_salary, transfer) — see Phase 5 notes
+      dashboard_service.py  → aggregate stats, trending posts, timeline queries
     simulation/
       personality.py      → personality_json generator (5 traits, 0-100)
       name_generator.py   → random name generator for auto-created citizens
@@ -321,15 +382,16 @@ backend/
       engine.py            → run_tick(db): orchestrates decide_and_act across all citizens, batches the commit, records the tick, writes real posts + pays salaries + broadcasts
       post_content.py      → mood-derived template content for the create_post action
       salary.py            → job-based salary calculation for the work action
+      milestones.py         → post-tick milestone detectors (population/richest-citizen/happiness) that populate the timeline
     tasks/
       tick_scheduler.py    → APScheduler background loop calling engine.run_tick() on an interval
     websocket/
       connection_manager.py → realtime feed broadcast, thread-safe for both API handlers and the scheduler thread
     api/v1/
-      auth.py, citizens.py, simulation.py, social.py, wallet.py → route handlers, one file per domain
-    main.py                → FastAPI app entrypoint (lifespan-based startup, /ws/feed route)
+      auth.py, citizens.py, simulation.py, social.py, wallet.py, dashboard.py → route handlers, one file per domain
+    main.py                → FastAPI app entrypoint (lifespan-based startup, /ws/feed route, resilient create_all safety net)
   alembic/                 → migrations (wired to app.core.config + models)
-  tests/                   → pytest suite (67 tests, all passing)
+  tests/                   → pytest suite (76 tests, all passing)
   requirements.txt
   .env.example
 ```
@@ -339,9 +401,10 @@ the simulation engine (Phase 3+) reuse the same services without duplicating
 logic, and what makes a future MySQL → PostgreSQL move a config change
 rather than a rewrite.
 
-## Not in Phase 1 + 2 + 3 + 4 + 5 (by design)
+## Not in Phase 1 + 2 + 3 + 4 + 5 + 6 (by design)
 
-- No frontend yet (added once there's something to look at)
+- No frontend yet (backend-only per current direction — HTML/Bootstrap
+  frontend from the original SDD stays deferred until you're ready for it)
 - `role` is always `spectator` on signup — promoting a user to `admin` is a
   manual DB update for now; an admin-management endpoint isn't needed yet
 - Citizen/simulation/social/economy write actions only require *any*
@@ -350,8 +413,6 @@ rather than a rewrite.
   you want that instead
 - Memory has no decay/sentiment scoring yet (per the approved v0.1
   simplification) — it's a flat importance-ranked log
-- No timeline/milestone-detector (SDD §9) yet — folding that into Phase 6
-  alongside the dashboard, since it reads off data these phases produce
 - WebSocket broadcasts are best-effort and in-memory only (no Redis pub/sub
   — per the approved v0.1 stack) — fine for one server instance, won't fan
   out across multiple processes if you ever run more than one
@@ -360,3 +421,9 @@ rather than a rewrite.
   v0.1 economy
 - Salary amounts are flat per-job-per-work-tick rates, not a simulated labor
   market — no unemployment benefits, no price inflation, no company payroll
+- Only 3 milestone categories are detected (population, richest_citizen,
+  happiness) — more (first business, economic crisis, etc.) are one function
+  each to add in `milestones.py` once those features exist
+- Auth uses `HTTPBearer`, not `OAuth2PasswordBearer` — an explicit choice,
+  not a default; if you ever add an OAuth2-based login flow later, this
+  would need revisiting
