@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Citizens — AI Society Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+<link rel="stylesheet" href="../static/css/custom.css" />
+</head>
+<body>
+
+<div id="asim-nav"></div>
+
+<main class="container-fluid px-3 px-md-4 py-4" style="max-width: 1200px;">
+
+  <div class="d-flex justify-content-between align-items-end flex-wrap gap-3 mb-4">
+    <div>
+      <h1 class="h3 mb-1">Citizens</h1>
+      <p class="text-ink-soft mb-0" id="citizen-count-sub">Loading…</p>
+    </div>
+    <button id="create-citizen-btn" class="btn btn-asim-amber">Add a citizen</button>
+  </div>
+
+  <div id="citizens-feedback" class="mb-3"></div>
+
+  <div class="row g-3" id="citizens-grid">
+    <div class="col-12 text-ink-faint">Loading citizens…</div>
+  </div>
+
+  <nav class="mt-4" id="citizens-pagination"></nav>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="../static/js/config.js"></script>
+<script src="../static/js/api/client.js"></script>
+<script src="../static/js/api/auth.js"></script>
+<script src="../static/js/api/citizens.js"></script>
+<script src="../static/js/websocket.js"></script>
+<script src="../static/js/nav.js"></script>
+<script src="../static/js/pages/citizens.js"></script>
+</body>
+</html>

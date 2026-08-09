@@ -1,0 +1,392 @@
+/* ==========================================================================
+   AI Society Simulator — Design Tokens
+
+   Direction: a civic observatory, not a social app. This is a control
+   room for watching a population of AI citizens live their lives — so the
+   palette borrows from census records and instrument panels (paper, ink,
+   brass) rather than social-media brights. Two typographic voices carry
+   the concept: Fraunces (serif, has personality) names citizens and
+   headlines — because citizens are individuals with stories — while
+   JetBrains Mono renders every number, timestamp, and tick count, because
+   aggregate data is a different kind of thing than a person. Inter holds
+   the UI chrome together in between.
+   ========================================================================== */
+
+:root {
+  /* Palette */
+  --paper: #f6f5f1;
+  --paper-raised: #ffffff;
+  --ink: #1e2a33;
+  --ink-soft: #57666f;
+  --ink-faint: #8b9aa2;
+  --line: #ddd8ca;
+  --line-soft: #e9e5d9;
+  --amber: #e8a33d;
+  --amber-soft: #fbe8c8;
+  --teal: #2f6f6b;
+  --teal-soft: #dcebe9;
+  --brick: #c1443c;
+  --brick-soft: #f6dcda;
+
+  /* Type */
+  --font-display: "Fraunces", "Iowan Old Style", serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Rhythm */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow-card: 0 1px 2px rgba(30, 42, 51, 0.04), 0 4px 16px rgba(30, 42, 51, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.font-mono, .mono, code, .stat-value, .tick-count, time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+a {
+  color: var(--teal);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+::selection {
+  background: var(--amber-soft);
+}
+
+/* Visible keyboard focus everywhere — never suppressed */
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- Top nav ---------- */
+
+.asim-nav {
+  background: var(--ink);
+  color: var(--paper);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.asim-nav .brand {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.15rem;
+  color: var(--paper);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.asim-nav a.nav-link {
+  color: rgba(246, 245, 241, 0.72);
+  font-size: 0.92rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+.asim-nav a.nav-link:hover {
+  color: var(--paper);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.06);
+}
+.asim-nav a.nav-link.active {
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Signature element: the simulation pulse — a small live indicator that
+   ticks with the actual tick counter, not decorative. Off by default
+   (grey) until a WS connection confirms the simulation is live. */
+.sim-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+.sim-pulse .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  flex: none;
+}
+.sim-pulse.live { color: var(--amber); }
+.sim-pulse.live .dot {
+  background: var(--amber);
+  animation: pulse-beat 2.2s ease-in-out infinite;
+}
+@keyframes pulse-beat {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 163, 61, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(232, 163, 61, 0); }
+}
+
+/* ---------- Cards ---------- */
+
+.asim-card {
+  background: var(--paper-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 1.25rem 1.4rem;
+}
+
+.stat-card .stat-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin-bottom: 0.35rem;
+}
+.stat-card .stat-value {
+  font-size: 1.9rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.stat-card .stat-sub {
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  margin-top: 0.3rem;
+}
+
+/* ---------- Buttons (Bootstrap overrides, kept minimal) ---------- */
+
+.btn-asim-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  font-weight: 500;
+}
+.btn-asim-primary:hover {
+  background: #0f1720;
+  border-color: #0f1720;
+  color: var(--paper);
+}
+.btn-asim-amber {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: var(--ink);
+  font-weight: 500;
+}
+.btn-asim-amber:hover {
+  background: #d4922f;
+  border-color: #d4922f;
+  color: var(--ink);
+}
+.btn-outline-asim {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+.btn-outline-asim:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* ---------- Citizen cards ---------- */
+
+.citizen-card {
+  background: var(--paper-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.citizen-card:hover {
+  border-color: var(--teal);
+}
+.citizen-card .citizen-name {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.citizen-card .citizen-meta {
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+.trait-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-soft);
+  overflow: hidden;
+  margin-top: 2px;
+}
+.trait-bar-fill {
+  height: 100%;
+  background: var(--teal);
+}
+.badge-activity {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.badge-activity.idle { background: var(--line-soft); color: var(--ink-soft); }
+.badge-activity.working { background: var(--amber-soft); color: #8a611f; }
+
+/* ---------- Feed ---------- */
+
+.feed-post {
+  border-bottom: 1px solid var(--line-soft);
+  padding: 1rem 0;
+}
+.feed-post:first-child { padding-top: 0; }
+.feed-post .post-author {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1rem;
+}
+.feed-post .post-time {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+}
+.feed-post .post-content {
+  margin: 0.4rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+.feed-post .post-actions {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 1rem;
+}
+.feed-post.is-new {
+  animation: new-post-highlight 2.5s ease-out;
+}
+@keyframes new-post-highlight {
+  0% { background: var(--amber-soft); }
+  100% { background: transparent; }
+}
+
+/* ---------- Timeline ---------- */
+
+.timeline-event {
+  position: relative;
+  padding-left: 1.6rem;
+  padding-bottom: 1.4rem;
+  border-left: 2px solid var(--line-soft);
+  margin-left: 0.4rem;
+}
+.timeline-event:last-child { border-left-color: transparent; }
+.timeline-event::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--teal);
+  border: 2px solid var(--paper);
+}
+.timeline-event.category-happiness::before { background: var(--brick); }
+.timeline-event.category-population::before { background: var(--amber); }
+.timeline-event .event-tick {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.timeline-event .event-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.02rem;
+  margin: 0.15rem 0 0.2rem;
+}
+.timeline-event .event-desc {
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+
+/* ---------- Login ---------- */
+
+.auth-shell {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+}
+.auth-card .brand-mark {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+.auth-card .brand-tagline {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+
+/* ---------- Utility ---------- */
+
+.text-ink-soft { color: var(--ink-soft); }
+.text-ink-faint { color: var(--ink-faint); }
+.text-amber { color: var(--amber); }
+.text-teal { color: var(--teal); }
+.text-brick { color: var(--brick); }
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--ink-faint);
+}
+.form-control:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 0.2rem rgba(47, 111, 107, 0.12);
+}
+.alert-asim-error {
+  background: var(--brick-soft);
+  color: var(--brick);
+  border: 1px solid rgba(193, 68, 60, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.85rem;
+  font-size: 0.86rem;
+}
