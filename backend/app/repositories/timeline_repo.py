@@ -1,6 +1,5 @@
 from typing import Optional
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.timeline_event import TimelineEvent
@@ -48,6 +47,13 @@ def list_paginated(
     query = db.query(TimelineEvent)
     if category:
         query = query.filter(TimelineEvent.category == category)
-    total = query.with_entities(func.count()).scalar() or 0
+    # NOTE: previously used query.with_entities(func.count()).scalar(),
+    # which generates a bare "SELECT count(*)" with NO FROM clause once
+    # with_entities() drops the query's table context — MySQL happily
+    # returns 1 for that (counting one implicit row of constants),
+    # completely disconnected from the actual table. query.count() is the
+    # correct way to count a filtered ORM query; it preserves the FROM
+    # clause and any .filter() already applied.
+    total = query.count()
     items = query.order_by(TimelineEvent.id.desc()).offset(offset).limit(limit).all()
     return items, total

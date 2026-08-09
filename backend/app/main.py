@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool  # <-- table creation ব্লক না করার জন্য
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import auth as auth_routes
 from app.api.v1 import citizens as citizen_routes
@@ -37,6 +38,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.APP_NAME, version="0.1.0", lifespan=lifespan)
+
+# v0.1 frontend is static HTML/JS served from its own dev port (see
+# frontend/README.md) — no cookies/credentials involved (JWT goes in a
+# header, not a cookie), so a permissive local-dev CORS policy is fine.
+# Tighten this to a specific origin before any real deployment.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 register_error_handlers(app)
 

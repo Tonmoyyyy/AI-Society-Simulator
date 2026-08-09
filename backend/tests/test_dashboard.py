@@ -172,3 +172,31 @@ def test_timeline_unknown_category_returns_empty(client):
     resp = client.get("/api/v1/timeline?category=nonexistent_category")
     assert resp.status_code == 200
     assert resp.json()["items"] == []
+
+
+def test_timeline_total_matches_items_when_empty(client):
+    """Regression test: list_paginated used to run a bare
+    `SELECT count(*)` with no FROM clause (via with_entities(func.count())
+    on a query that had no explicit select_from), which MySQL happily
+    answers with 1 regardless of how many rows actually exist — so an
+    empty timeline reported total=1 with items=[]. Must be 0/[] together."""
+    resp = client.get("/api/v1/timeline")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 0
+    assert body["items"] == []
+
+
+def test_timeline_total_matches_items_length_on_one_page(client):
+    """Same bug, other direction: with exactly one event and a page size
+    bigger than the result set, total must equal len(items), not some
+    FROM-less artifact."""
+    token = _get_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    for _ in range(10):
+        _make_citizen(client, headers)
+    client.post("/api/v1/simulation/tick", headers=headers)
+
+    resp = client.get("/api/v1/timeline?page_size=50")
+    body = resp.json()
+    assert body["total"] == len(body["items"])
