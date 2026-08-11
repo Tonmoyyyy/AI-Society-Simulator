@@ -40,16 +40,29 @@ def count_reactions(db: Session, post_id: int) -> int:
 
 # ---- comments ----
 
-def create_comment(db: Session, post_id: int, citizen_id: int, content: str) -> Comment:
+def create_comment(db: Session, post_id: int, citizen_id: int, content: str, commit: bool = True) -> Comment:
     comment = Comment(post_id=post_id, citizen_id=citizen_id, content=content)
     db.add(comment)
-    db.commit()
-    db.refresh(comment)
+    if commit:
+        db.commit()
+        db.refresh(comment)
     return comment
 
 
 def list_comments(db: Session, post_id: int) -> list[Comment]:
     return db.query(Comment).filter(Comment.post_id == post_id).order_by(Comment.id).all()
+
+
+def get_most_recent_post(db: Session, citizen_id: int) -> Optional[Post]:
+    """Used by the tick engine's socialize action to find something for
+    one citizen to comment on/react to/follow-over from another citizen —
+    see engine.py's social-interaction step."""
+    return (
+        db.query(Post)
+        .filter(Post.citizen_id == citizen_id)
+        .order_by(Post.id.desc())
+        .first()
+    )
 
 
 # ---- reactions ----
@@ -62,11 +75,12 @@ def get_reaction(db: Session, post_id: int, citizen_id: int) -> Optional[Reactio
     )
 
 
-def create_reaction(db: Session, post_id: int, citizen_id: int, type_: str) -> Reaction:
+def create_reaction(db: Session, post_id: int, citizen_id: int, type_: str, commit: bool = True) -> Reaction:
     reaction = Reaction(post_id=post_id, citizen_id=citizen_id, type=type_)
     db.add(reaction)
-    db.commit()
-    db.refresh(reaction)
+    if commit:
+        db.commit()
+        db.refresh(reaction)
     return reaction
 
 
@@ -85,11 +99,12 @@ def get_follow(db: Session, follower_id: int, followee_id: int) -> Optional[Foll
     )
 
 
-def create_follow(db: Session, follower_id: int, followee_id: int) -> Follow:
+def create_follow(db: Session, follower_id: int, followee_id: int, commit: bool = True) -> Follow:
     follow = Follow(follower_id=follower_id, followee_id=followee_id)
     db.add(follow)
-    db.commit()
-    db.refresh(follow)
+    if commit:
+        db.commit()
+        db.refresh(follow)
     return follow
 
 

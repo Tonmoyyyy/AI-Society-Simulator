@@ -6,8 +6,16 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.citizen import Citizen
 from app.repositories import citizen_repo
+from app.simulation.jobs import JOB_NAMES
 from app.simulation.name_generator import generate_name
 from app.simulation.personality import generate_personality
+
+# New citizens are employed 75% of the time (a random job from the
+# catalog), unemployed the rest — a real city isn't 100% employed, and an
+# all-unemployed starting population made the economy/social features feel
+# dead until someone manually assigned jobs (see discussion that led to
+# this fix).
+_EMPLOYMENT_RATE = 0.75
 
 
 class CitizenError(Exception):
@@ -25,6 +33,12 @@ class CitizenLimitReached(CitizenError):
     pass
 
 
+def _assign_starting_job() -> str:
+    if random.random() < _EMPLOYMENT_RATE:
+        return random.choice(JOB_NAMES)
+    return "unemployed"
+
+
 def create_citizen(db: Session, name: Optional[str], age: Optional[int]) -> Citizen:
     current_count = citizen_repo.count(db)
     if current_count >= settings.MAX_CITIZENS_V0:
@@ -35,12 +49,14 @@ def create_citizen(db: Session, name: Optional[str], age: Optional[int]) -> Citi
     resolved_name = name or generate_name()
     resolved_age = age if age is not None else random.randint(18, 70)
     personality = generate_personality()
+    job = _assign_starting_job()
 
     return citizen_repo.create(
         db,
         name=resolved_name,
         age=resolved_age,
         personality_json=personality,
+        job=job,
     )
 
 

@@ -25,7 +25,11 @@ def test_create_citizen_fully_random(client):
     assert body["happiness"] == 50.0
     assert body["energy"] == 100.0
     assert body["health"] == 100.0
-    assert body["job"] == "unemployed"
+    # job is randomly auto-assigned at creation (see citizen_service —
+    # ~75% employed with a job from the catalog, ~25% unemployed), so we
+    # only assert it's one of the valid outcomes, not a fixed default.
+    from app.simulation.jobs import JOB_NAMES
+    assert body["job"] in JOB_NAMES or body["job"] == "unemployed"
     assert body["current_activity"] == "idle"
     assert "money" not in body  # money must never appear on citizens (wallet is the source of truth)
 

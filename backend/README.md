@@ -1,4 +1,4 @@
-# AI Society Simulator — Backend (Phase 1 + 2 + 3 + 4 + 5 + 6)
+# AI Society Simulator — Backend (Phase 1-6 + Post-v0.1 Enhancements)
 
 **Phase 1** delivers: FastAPI scaffold, MySQL connection via SQLAlchemy, Alembic
 migrations, and a working JWT auth flow (signup / login / refresh / a
@@ -320,7 +320,75 @@ curl http://127.0.0.1:8000/api/v1/dashboard/trending
 curl "http://127.0.0.1:8000/api/v1/timeline?category=richest_citizen"
 ```
 
-## 12. Run tests
+## 12. Post-v0.1 enhancements: jobs, citizen-to-citizen interaction, marketplace
+
+Added after a direct question: *"why is every new citizen unemployed, and
+why don't citizens actually interact with or buy from each other?"* Three
+things were genuinely missing, not bugs — this section explains what
+changed.
+
+**1. Job auto-assignment.** New citizens used to always start
+`"unemployed"` — nothing ever assigned a job. Now `citizen_service.create_citizen`
+gives each new citizen a 75% chance of a random job from
+`app/simulation/jobs.py` (the same catalog `salary.py` already used), 25%
+unemployed — a real city isn't 100% employed either way. Verified live:
+40 fresh citizens came out to a 22.5% unemployed rate with jobs spread
+across all 10 job types.
+
+**2. Citizens actually interact with each other.** Previously, `socialize`
+only boosted the acting citizen's own mood — nothing connected two
+citizens. Now, when `socialize` is chosen, `app/simulation/social_interactions.py`
+picks a random other citizen and (independently) may react to their most
+recent post (50%), comment on it (30% — see `comment_content.py` for the
+canned reply templates), and/or follow them (15%), all deduplicated
+against existing reactions/follows. This is deliberately a *secondary
+effect* layered on the existing utility-scored FSM, not a new competing
+primary action — see the module docstring for why (the utility functions
+don't have a natural way to score "who to target" yet). Verified live over
+~60 ticks on 40 citizens: comments, reactions, and follows all fired
+(7/16/9 respectively), and confirmed broadcasting over `/ws/feed` as
+`new_comment` / `new_reaction` / `new_follow`.
+
+**3. A real marketplace.** New tables: `shops`, `products`, `purchases`.
+Four shops with 12 products between them are seeded automatically at
+startup (idempotent — see `simulation/seed_shops.py`, same resilience
+pattern as the `create_all` safety net). Every tick, every citizen
+independently has a 20% chance (`simulation/shopping.py`) to buy a random
+affordable product if their wallet balance allows it — money is deducted,
+a `transactions` row (`type="purchase"`, `to_wallet_id=None` — leaving the
+simulated economy) and a `purchases` row (product/shop detail, price
+snapshotted at purchase time) are both written in the same batch commit as
+the rest of the tick. Verified live: 292 purchases across ~90 ticks on 40
+citizens, wallet balances decreasing correctly.
+
+New endpoints:
+
+| Method | Path | Auth required | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/shops` | No | All shops with their product catalogs |
+| POST | `/api/v1/shops` | Yes | Create a shop — `{"name": ..., "category": ...}` |
+| POST | `/api/v1/shops/{shop_id}/products` | Yes | Add a product — `{"name": ..., "price": ...}` |
+| GET | `/api/v1/citizens/{citizen_id}/purchases` | No | A citizen's purchase history, most recent first |
+
+**A real bug hit while verifying this, worth knowing about:** while testing
+via curl in a long-running session, a batch of tick calls silently failed
+with `401` because the JWT access token had expired mid-testing
+(`ACCESS_TOKEN_EXPIRE_MINUTES=30`) — the counts looked "frozen" and briefly
+looked like a stuck-engine bug before the cause turned out to be a stale
+token. Not a code bug, but worth remembering if your own testing session
+runs long: re-login and get a fresh token rather than assuming the
+simulation stalled.
+
+**A real test-assumption break, now fixed:** several existing Phase 2/5/6
+tests asserted a freshly-created citizen is `"unemployed"` by default —
+true before this change, no longer guaranteed. Fixed by having those tests
+explicitly force `job="unemployed"` via `PATCH` when they need a
+guaranteed-empty-wallet citizen, rather than relying on an assumption that
+no longer holds. If you add your own tests that need a specific
+employment state, do the same — don't assume "just created" means
+unemployed anymore.
+
+## 13. Run tests
 
 ```bash
 python -m pytest tests/ -v
@@ -331,12 +399,14 @@ external dependencies — verified by running the full suite with MySQL
 completely stopped. This works because the code sticks to portable
 SQLAlchemy types (same models run against both engines) and because the
 `create_all` safety net in `main.py`'s lifespan degrades gracefully instead
-of crashing when MySQL isn't reachable (see Phase 6 notes above). 76 tests
+of crashing when MySQL isn't reachable (see Phase 6 notes above). 98 tests
 total (10 auth, 14 citizens, 15 simulation, 18 social, 10 wallet, 9
-dashboard/timeline — including a WebSocket test and regression tests for
-every bug described in this README), all passing.
+dashboard/timeline, 4 job assignment, 6 social interactions, 12 shop —
+including a WebSocket test and regression tests for every bug described in
+this README), all passing, stable across repeated runs despite several
+tests being probability-based.
 
-## What's in Phase 1 + 2 + 3 + 4 + 5 + 6
+## What's in Phase 1 + 2 + 3 + 4 + 5 + 6 (+ post-v0.1 enhancements)
 
 ```
 backend/
@@ -359,6 +429,7 @@ backend/
       wallet.py           → wallets table (sole source of truth for citizen money)
       transaction.py      → transactions table (immutable ledger row per balance change)
       timeline_event.py   → timeline_events table (Simulation Timeline, SDD §9)
+      shop.py, product.py, purchase.py → the marketplace tables (post-v0.1 addition)
     schemas/               → Pydantic request/response models
     repositories/
       user_repo.py        → DB access only, no business rules
@@ -367,13 +438,15 @@ backend/
       social_repo.py       → DB access for posts/comments/reactions/follows
       wallet_repo.py        → DB access for wallets/transactions, incl. get_locked() row-lock helper
       timeline_repo.py      → DB access for timeline_events, incl. dedup helpers (exists_with_title, get_latest_by_category)
+      shop_repo.py           → DB access for shops/products/purchases, incl. list_affordable_products()
     services/
       auth_service.py     → signup/login/refresh business logic
-      citizen_service.py  → citizen CRUD + v0.1 100-citizen cap enforcement
+      citizen_service.py  → citizen CRUD + v0.1 100-citizen cap enforcement + job auto-assignment
       simulation_service.py → wraps engine.run_tick() + tick/memory queries for the API layer
       social_service.py     → posts/comments/reactions/follows business rules + websocket broadcast
       wallet_service.py     → atomic wallet mutations (pay_salary, transfer) — see Phase 5 notes
       dashboard_service.py  → aggregate stats, trending posts, timeline queries
+      shop_service.py        → shop/product creation, purchase history queries
     simulation/
       personality.py      → personality_json generator (5 traits, 0-100)
       name_generator.py   → random name generator for auto-created citizens
@@ -381,17 +454,22 @@ backend/
       decision_pipeline.py → decide_and_act(citizen): the per-citizen perceive→score→select→execute loop
       engine.py            → run_tick(db): orchestrates decide_and_act across all citizens, batches the commit, records the tick, writes real posts + pays salaries + broadcasts
       post_content.py      → mood-derived template content for the create_post action
-      salary.py            → job-based salary calculation for the work action
+      salary.py            → job-based salary calculation for the work action (reads from jobs.py)
+      jobs.py               → shared job catalog (name → base salary) used by salary.py and citizen_service's auto-assignment
       milestones.py         → post-tick milestone detectors (population/richest-citizen/happiness) that populate the timeline
+      social_interactions.py → citizen-to-citizen comment/react/follow, triggered when socialize is chosen
+      comment_content.py    → templated comment text for social_interactions.py
+      shopping.py            → per-citizen-per-tick chance to buy an affordable product
+      seed_shops.py           → idempotent starter shops/products, run at app startup
     tasks/
       tick_scheduler.py    → APScheduler background loop calling engine.run_tick() on an interval
     websocket/
       connection_manager.py → realtime feed broadcast, thread-safe for both API handlers and the scheduler thread
     api/v1/
-      auth.py, citizens.py, simulation.py, social.py, wallet.py, dashboard.py → route handlers, one file per domain
-    main.py                → FastAPI app entrypoint (lifespan-based startup, /ws/feed route, resilient create_all safety net)
+      auth.py, citizens.py, simulation.py, social.py, wallet.py, dashboard.py, shop.py → route handlers, one file per domain
+    main.py                → FastAPI app entrypoint (lifespan-based startup, /ws/feed route, resilient create_all + shop-seed safety nets)
   alembic/                 → migrations (wired to app.core.config + models)
-  tests/                   → pytest suite (76 tests, all passing)
+  tests/                   → pytest suite (98 tests, all passing)
   requirements.txt
   .env.example
 ```
@@ -401,10 +479,12 @@ the simulation engine (Phase 3+) reuse the same services without duplicating
 logic, and what makes a future MySQL → PostgreSQL move a config change
 rather than a rewrite.
 
-## Not in Phase 1 + 2 + 3 + 4 + 5 + 6 (by design)
+## Not in Phase 1 + 2 + 3 + 4 + 5 + 6 (+ post-v0.1 enhancements) (by design)
 
-- No frontend yet (backend-only per current direction — HTML/Bootstrap
-  frontend from the original SDD stays deferred until you're ready for it)
+- Frontend exists (see `/frontend`) but is intentionally minimal — no
+  citizen profile/detail page, no manual post/comment/reaction/follow UI
+  (those are driven by the tick engine), no per-citizen wallet/purchase
+  history view yet
 - `role` is always `spectator` on signup — promoting a user to `admin` is a
   manual DB update for now; an admin-management endpoint isn't needed yet
 - Citizen/simulation/social/economy write actions only require *any*
@@ -416,11 +496,13 @@ rather than a rewrite.
 - WebSocket broadcasts are best-effort and in-memory only (no Redis pub/sub
   — per the approved v0.1 stack) — fine for one server instance, won't fan
   out across multiple processes if you ever run more than one
-- No tax, borrowing, or business/company entities — citizens earn salary and
-  can be manually transferred money between each other, that's the whole
-  v0.1 economy
+- No tax or borrowing — citizens earn salary, spend at shops, and can be
+  manually transferred money between each other; no loans/interest/credit
 - Salary amounts are flat per-job-per-work-tick rates, not a simulated labor
   market — no unemployment benefits, no price inflation, no company payroll
+- Shops are system-owned (no `owner_citizen_id`) and product prices are
+  fixed — no citizen-run businesses, no supply/demand pricing, no restocking
+  or inventory limits
 - Only 3 milestone categories are detected (population, richest_citizen,
   happiness) — more (first business, economic crisis, etc.) are one function
   each to add in `milestones.py` once those features exist

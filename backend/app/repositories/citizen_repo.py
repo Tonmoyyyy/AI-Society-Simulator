@@ -37,12 +37,14 @@ def create(
     name: str,
     age: int,
     personality_json: dict,
+    job: str = "unemployed",
 ) -> Citizen:
     citizen = Citizen(
         name=name,
         age=age,
         personality_json=personality_json,
-        # mood/happiness/energy/health/job/current_activity use model defaults
+        job=job,
+        # mood/happiness/energy/health/current_activity use model defaults
     )
     db.add(citizen)
     db.commit()

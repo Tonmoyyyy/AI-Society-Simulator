@@ -74,7 +74,7 @@ def test_working_citizen_gets_paid(client):
 def test_unemployed_citizen_never_gets_paid(client):
     token = _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
-    citizen_id = _make_citizen(client, headers)  # job defaults to "unemployed"
+    citizen_id = _make_citizen(client, headers, job="unemployed")  # job auto-assignment (added later) is random by default, so force it explicitly here
 
     for _ in range(10):
         client.post("/api/v1/simulation/tick", headers=headers)
@@ -143,7 +143,7 @@ def test_successful_transfer_moves_balance(client):
     token = _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
     a = _make_citizen(client, headers, job="engineer")
-    b = _make_citizen(client, headers)
+    b = _make_citizen(client, headers, job="unemployed")  # must start with a known, empty wallet — job auto-assignment (added later) is random otherwise
 
     # give `a` some money via enough work ticks
     for _ in range(30):

@@ -8,13 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1 import auth as auth_routes
 from app.api.v1 import citizens as citizen_routes
 from app.api.v1 import dashboard as dashboard_routes
+from app.api.v1 import shop as shop_routes
 from app.api.v1 import simulation as simulation_routes
 from app.api.v1 import social as social_routes
 from app.api.v1 import wallet as wallet_routes  # <-- আগে বাদ পড়ে গিয়েছিল
 from app.core.config import settings
 from app.core.error_handlers import register_error_handlers
 from app.db.base import Base  # ডাটাবেজ মডেলের Base ইমপোর্ট
-from app.db.session import engine  # SQLAlchemy engine ইমপোর্ট
+from app.db.session import engine, SessionLocal  # SQLAlchemy engine ইমপোর্ট
+from app.simulation.seed_shops import ensure_seed_shops
 from app.websocket.connection_manager import manager
 
 
@@ -31,6 +33,21 @@ async def lifespan(app: FastAPI):
         await run_in_threadpool(Base.metadata.create_all, bind=engine)
     except Exception as exc:
         print(f"[startup] Skipping auto-create tables (DB not reachable yet?): {exc}")
+
+    # Seed starter shops/products so the marketplace isn't empty out of the
+    # box — idempotent (no-op if shops already exist), same resilience
+    # pattern as create_all above.
+    def _seed():
+        db = SessionLocal()
+        try:
+            ensure_seed_shops(db)
+        finally:
+            db.close()
+
+    try:
+        await run_in_threadpool(_seed)
+    except Exception as exc:
+        print(f"[startup] Skipping shop seed (DB not reachable yet?): {exc}")
 
     # ২. Websocket event loop bind
     manager.bind_loop(asyncio.get_running_loop())
@@ -59,6 +76,7 @@ app.include_router(simulation_routes.router)
 app.include_router(social_routes.router)
 app.include_router(wallet_routes.router)  # <-- আগে বাদ পড়ে গিয়েছিল
 app.include_router(dashboard_routes.router)
+app.include_router(shop_routes.router)
 
 
 @app.websocket("/ws/feed")

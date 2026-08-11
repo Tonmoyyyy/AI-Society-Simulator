@@ -31,7 +31,7 @@ def test_dashboard_stats_reflects_citizens(client):
     token = _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
     _make_citizen(client, headers, job="engineer")
-    _make_citizen(client, headers)  # unemployed
+    _make_citizen(client, headers, job="unemployed")  # job auto-assignment (added later) is random by default, so force it explicitly here
 
     resp = client.get("/api/v1/dashboard/stats")
     body = resp.json()

@@ -14,6 +14,8 @@ from app.simulation import milestones
 from app.simulation.decision_pipeline import decide_and_act
 from app.simulation.post_content import generate_post_content
 from app.simulation.salary import calculate_salary
+from app.simulation.shopping import perform_shopping
+from app.simulation.social_interactions import perform_social_interaction
 from app.services import wallet_service
 from app.websocket.connection_manager import manager
 
@@ -24,6 +26,7 @@ def run_tick(db: Session) -> dict:
     citizens = db.query(Citizen).all()
     processed = 0
     new_posts: list[tuple[str, object]] = []  # (citizen_name, Post) — broadcast after commit
+    broadcast_queue: list[dict] = []  # social-interaction + purchase events — broadcast after commit
 
     try:
         for citizen in citizens:
@@ -49,6 +52,15 @@ def run_tick(db: Session) -> dict:
                 salary = calculate_salary(citizen)
                 wallet_service.pay_salary(db, citizen.id, salary, commit=False)
 
+            # Secondary effects — layered on top of the primary action FSM,
+            # not competing actions in it (see each module's docstring for
+            # why). "socialize" gains a real target; every citizen
+            # independently has a modest chance to shop regardless of
+            # their primary action this tick.
+            if result is not None and result.memory_event == "socialized":
+                perform_social_interaction(db, citizen, citizens, broadcast_queue)
+            perform_shopping(db, citizen, broadcast_queue)
+
             processed += 1
 
         db.commit()  # one batch commit for the whole tick, not per-citizen
@@ -63,7 +75,7 @@ def run_tick(db: Session) -> dict:
             db.commit()
 
         # Broadcast only after the commit succeeds, so a WS client never
-        # hears about a post that then gets rolled back.
+        # hears about something that then gets rolled back.
         for citizen_name, post in new_posts:
             db.refresh(post)
             manager.broadcast_threadsafe({
@@ -81,6 +93,8 @@ def run_tick(db: Session) -> dict:
                 "title": event.title,
                 "description": event.description,
             })
+        for event in broadcast_queue:
+            manager.broadcast_threadsafe(event)
     except Exception:
         db.rollback()
         simulation_tick_repo.finish_tick(db, tick, citizens_processed=processed, status="failed")
