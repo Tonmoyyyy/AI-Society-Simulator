@@ -6,16 +6,16 @@ dict, not two files that could drift apart.
 """
 
 JOB_BASE_SALARY = {
-    "engineer": 120,
-    "doctor": 150,
-    "nurse": 90,
+    "engineer": 100,
+    "doctor": 90,
+    "nurse": 60,
     "teacher": 70,
     "chef": 70,
     "shopkeeper": 65,
     "driver": 55,
     "farmer": 60,
     "artist": 55,
-    "baker": 150,
+    "banker": 150,
 }
 
 DEFAULT_BASE_SALARY = 60
