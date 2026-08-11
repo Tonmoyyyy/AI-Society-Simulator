@@ -23,4 +23,8 @@ const CitizensApi = {
   async wallet(citizenId) {
     return apiFetch(`/api/v1/citizens/${citizenId}/wallet`);
   },
+
+  async purchases(citizenId, limit = 10) {
+    return apiFetch(`/api/v1/citizens/${citizenId}/purchases?limit=${limit}`);
+  },
 };

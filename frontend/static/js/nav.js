@@ -9,6 +9,7 @@ const AsimNav = (() => {
     { key: "dashboard", href: "dashboard.html", label: "Dashboard" },
     { key: "citizens", href: "citizens.html", label: "Citizens" },
     { key: "feed", href: "feed.html", label: "Feed" },
+    { key: "shops", href: "shops.html", label: "Marketplace" },
     { key: "timeline", href: "timeline.html", label: "Timeline" },
   ];
 

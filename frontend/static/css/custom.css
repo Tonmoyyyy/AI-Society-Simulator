@@ -342,6 +342,73 @@ a:hover {
   color: var(--ink-soft);
 }
 
+/* ---------- Shops / Marketplace ---------- */
+
+.shop-card {
+  background: var(--paper-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem;
+  box-shadow: var(--shadow-card);
+  height: 100%;
+}
+.shop-card .shop-name {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.badge-category {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: #8a611f;
+}
+.product-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 0.88rem;
+}
+.product-row:last-child { border-bottom: none; }
+.product-row .product-price {
+  font-family: var(--font-mono);
+  color: var(--teal);
+  font-weight: 500;
+}
+
+/* ---------- Citizen detail modal ---------- */
+
+.citizen-modal-stat {
+  text-align: center;
+  padding: 0.6rem 0.4rem;
+  background: var(--paper);
+  border-radius: var(--radius-sm);
+}
+.citizen-modal-stat .label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+}
+.citizen-modal-stat .value {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.modal-list-item {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 0.85rem;
+}
+.modal-list-item:last-child { border-bottom: none; }
+.citizen-card { cursor: pointer; }
+
 /* ---------- Login ---------- */
 
 .auth-shell {

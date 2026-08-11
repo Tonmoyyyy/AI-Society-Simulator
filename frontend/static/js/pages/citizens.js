@@ -32,7 +32,7 @@
 
     return `
       <div class="col-sm-6 col-lg-4">
-        <div class="citizen-card h-100">
+        <div class="citizen-card h-100" data-citizen-id="${c.id}" data-citizen-name="${escapeHtml(c.name)}">
           <div class="d-flex justify-content-between align-items-start mb-1">
             <div class="citizen-name">${escapeHtml(c.name)}</div>
             <span class="badge-activity ${activityClass(c.current_activity)}">${escapeHtml(c.current_activity)}</span>
