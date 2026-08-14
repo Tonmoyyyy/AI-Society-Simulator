@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.models.citizen import Citizen
 from app.repositories import citizen_repo
 from app.simulation.jobs import JOB_NAMES
+from app.simulation.neighborhoods import NEIGHBORHOOD_NAMES
 from app.simulation.name_generator import generate_name
 from app.simulation.personality import generate_personality
 
@@ -39,7 +40,18 @@ def _assign_starting_job() -> str:
     return "unemployed"
 
 
-def create_citizen(db: Session, name: Optional[str], age: Optional[int]) -> Citizen:
+def create_citizen(
+    db: Session,
+    name: Optional[str],
+    age: Optional[int],
+    job: Optional[str] = None,
+    neighborhood: Optional[str] = None,
+    personality_json: Optional[dict] = None,
+) -> Citizen:
+    """Every field is independently overridable — pass any subset and the
+    rest still get randomized. Validation of job/neighborhood/personality
+    values already happened at the schema layer (schemas/citizen.py); this
+    layer only fills in what wasn't provided."""
     current_count = citizen_repo.count(db)
     if current_count >= settings.MAX_CITIZENS_V0:
         raise CitizenLimitReached(
@@ -48,15 +60,17 @@ def create_citizen(db: Session, name: Optional[str], age: Optional[int]) -> Citi
 
     resolved_name = name or generate_name()
     resolved_age = age if age is not None else random.randint(18, 70)
-    personality = generate_personality()
-    job = _assign_starting_job()
+    resolved_personality = personality_json or generate_personality()
+    resolved_job = job if job is not None else _assign_starting_job()
+    resolved_neighborhood = neighborhood if neighborhood is not None else random.choice(NEIGHBORHOOD_NAMES)
 
     return citizen_repo.create(
         db,
         name=resolved_name,
         age=resolved_age,
-        personality_json=personality,
-        job=job,
+        personality_json=resolved_personality,
+        job=resolved_job,
+        neighborhood=resolved_neighborhood,
     )
 
 
@@ -77,11 +91,12 @@ def update_citizen(
     citizen_id: int,
     name: Optional[str],
     job: Optional[str],
+    neighborhood: Optional[str],
     current_activity: Optional[str],
 ) -> Citizen:
     citizen = get_citizen(db, citizen_id)
     return citizen_repo.update(
-        db, citizen, name=name, job=job, current_activity=current_activity
+        db, citizen, name=name, job=job, neighborhood=neighborhood, current_activity=current_activity
     )
 
 

@@ -40,8 +40,15 @@ def count_reactions(db: Session, post_id: int) -> int:
 
 # ---- comments ----
 
-def create_comment(db: Session, post_id: int, citizen_id: int, content: str, commit: bool = True) -> Comment:
-    comment = Comment(post_id=post_id, citizen_id=citizen_id, content=content)
+def create_comment(
+    db: Session,
+    post_id: int,
+    citizen_id: int,
+    content: str,
+    parent_comment_id: Optional[int] = None,
+    commit: bool = True,
+) -> Comment:
+    comment = Comment(post_id=post_id, citizen_id=citizen_id, content=content, parent_comment_id=parent_comment_id)
     db.add(comment)
     if commit:
         db.commit()
@@ -51,6 +58,10 @@ def create_comment(db: Session, post_id: int, citizen_id: int, content: str, com
 
 def list_comments(db: Session, post_id: int) -> list[Comment]:
     return db.query(Comment).filter(Comment.post_id == post_id).order_by(Comment.id).all()
+
+
+def get_comment(db: Session, comment_id: int) -> Optional[Comment]:
+    return db.get(Comment, comment_id)
 
 
 def get_most_recent_post(db: Session, citizen_id: int) -> Optional[Post]:

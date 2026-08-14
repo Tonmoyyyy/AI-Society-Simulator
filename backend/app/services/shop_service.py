@@ -45,5 +45,24 @@ def create_product(db: Session, shop_id: int, name: str, price: Decimal):
     return shop_repo.create_product(db, shop_id=shop_id, name=name, price=price)
 
 
-def get_purchase_history(db: Session, citizen_id: int, limit: int = 20):
-    return shop_repo.list_purchases_for_citizen(db, citizen_id, limit=limit)
+def get_purchase_history(db: Session, citizen_id: int, limit: int = 20) -> list[dict]:
+    """Enriched with shop/product names (not just IDs) — the purchases
+    table itself is IDs-only by design (see Purchase model), but showing
+    "Product #5" in a UI is bad UX, so the API layer resolves names here
+    rather than pushing that join onto every client."""
+    purchases = shop_repo.list_purchases_for_citizen(db, citizen_id, limit=limit)
+    result = []
+    for purchase in purchases:
+        shop = shop_repo.get_shop(db, purchase.shop_id)
+        product = shop_repo.get_product(db, purchase.product_id)
+        result.append({
+            "id": purchase.id,
+            "citizen_id": purchase.citizen_id,
+            "shop_id": purchase.shop_id,
+            "shop_name": shop.name if shop else "Unknown shop",
+            "product_id": purchase.product_id,
+            "product_name": product.name if product else "Unknown product",
+            "price": purchase.price,
+            "created_at": purchase.created_at,
+        })
+    return result

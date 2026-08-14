@@ -45,14 +45,36 @@ def perform_social_interaction(db, citizen, other_citizens, broadcast_queue) -> 
             })
 
         if random.random() < COMMENT_PROBABILITY:
-            content = generate_comment_content()
-            social_repo.create_comment(db, post.id, citizen.id, content, commit=False)
+            # If others have already commented on this post, sometimes
+            # reply to one of their comments directly — a real threaded
+            # reply (parent_comment_id set), not just a top-level comment
+            # that happens to mention them. Combined with the @name
+            # addressing in comment_content.py, this is what turns
+            # isolated one-off comments into an actual back-and-forth
+            # between citizens.
+            existing_comments = social_repo.list_comments(db, post.id)
+            other_comments = [c for c in existing_comments if c.citizen_id != citizen.id]
+            parent_comment = random.choice(other_comments) if other_comments else None
+
+            reply_to_name = None
+            if parent_comment is not None:
+                match = next((c for c in other_citizens if c.id == parent_comment.citizen_id), None)
+                if match is not None:
+                    reply_to_name = match.name
+
+            content = generate_comment_content(citizen.personality_json, reply_to_name=reply_to_name)
+            social_repo.create_comment(
+                db, post.id, citizen.id, content,
+                parent_comment_id=parent_comment.id if parent_comment else None,
+                commit=False,
+            )
             broadcast_queue.append({
                 "type": "new_comment",
                 "post_id": post.id,
                 "citizen_id": citizen.id,
                 "citizen_name": citizen.name,
                 "content": content,
+                "parent_comment_id": parent_comment.id if parent_comment else None,
             })
 
     if random.random() < FOLLOW_PROBABILITY and social_repo.get_follow(db, citizen.id, target.id) is None:

@@ -11,6 +11,14 @@ class RichestCitizen(BaseModel):
     balance: Decimal
 
 
+class LeaderboardEntry(BaseModel):
+    citizen_id: int
+    name: str
+    job: str
+    neighborhood: str
+    balance: Decimal
+
+
 class DashboardStats(BaseModel):
     population: int
     average_happiness: float

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,6 +35,7 @@ class FeedResponse(BaseModel):
 class CommentCreate(BaseModel):
     citizen_id: int
     content: str = Field(min_length=1, max_length=1000)
+    parent_comment_id: Optional[int] = None  # set to reply to an existing comment instead of the post itself
 
 
 class CommentOut(BaseModel):
@@ -43,6 +45,7 @@ class CommentOut(BaseModel):
     post_id: int
     citizen_id: int
     content: str
+    parent_comment_id: Optional[int]
     created_at: datetime
 
 

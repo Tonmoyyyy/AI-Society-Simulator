@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db
-from app.schemas.dashboard import DashboardStats, TrendingPost
+from app.schemas.dashboard import DashboardStats, TrendingPost, LeaderboardEntry
 from app.schemas.timeline import TimelineListResponse
 from app.services import dashboard_service
 
@@ -22,6 +22,12 @@ def get_stats(db: Session = Depends(get_db)):
 def get_trending(limit: int = Query(default=5, ge=1, le=20), db: Session = Depends(get_db)):
     """Public — most-engaged recent posts, ranked by comments + reactions."""
     return dashboard_service.get_trending_posts(db, limit=limit)
+
+
+@router.get("/dashboard/leaderboard", response_model=list[LeaderboardEntry])
+def get_leaderboard(limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)):
+    """Public — every citizen's wallet balance, richest first."""
+    return dashboard_service.get_leaderboard(db, limit=limit)
 
 
 @router.get("/timeline", response_model=TimelineListResponse)

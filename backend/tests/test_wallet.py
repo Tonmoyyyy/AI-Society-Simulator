@@ -153,6 +153,11 @@ def test_successful_transfer_moves_balance(client):
     if a_wallet_before <= 0:
         # extremely unlikely given 30 ticks, but keep the test honest
         return
+    # b's balance is no longer guaranteed to be 0 here — the tick engine's
+    # gifting feature (added later) means citizens can autonomously send
+    # each other small amounts of money, so b may have received a gift
+    # from a (or, in principle, elsewhere) during those 30 ticks.
+    b_wallet_before = Decimal(str(client.get(f"/api/v1/citizens/{b}/wallet").json()["balance"]))
 
     transfer_amount = min(Decimal("10.00"), a_wallet_before)
     resp = client.post(
@@ -165,4 +170,4 @@ def test_successful_transfer_moves_balance(client):
     a_wallet_after = Decimal(str(client.get(f"/api/v1/citizens/{a}/wallet").json()["balance"]))
     b_wallet_after = Decimal(str(client.get(f"/api/v1/citizens/{b}/wallet").json()["balance"]))
     assert a_wallet_after == a_wallet_before - transfer_amount
-    assert b_wallet_after == transfer_amount
+    assert b_wallet_after == b_wallet_before + transfer_amount

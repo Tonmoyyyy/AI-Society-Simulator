@@ -72,19 +72,25 @@ def get_feed(db: Session, page: int, page_size: int) -> tuple[list[dict], int]:
     return items, total
 
 
-def add_comment(db: Session, post_id: int, citizen_id: int, content: str):
+def add_comment(db: Session, post_id: int, citizen_id: int, content: str, parent_comment_id: int | None = None):
     post = social_repo.get_post(db, post_id)
     if post is None:
         raise PostNotFound(f"Post {post_id} not found")
     citizen = _require_citizen(db, citizen_id)
 
-    comment = social_repo.create_comment(db, post_id, citizen_id, content)
+    if parent_comment_id is not None:
+        parent = social_repo.get_comment(db, parent_comment_id)
+        if parent is None or parent.post_id != post_id:
+            raise SocialError(f"Parent comment {parent_comment_id} not found on this post")
+
+    comment = social_repo.create_comment(db, post_id, citizen_id, content, parent_comment_id=parent_comment_id)
     manager.broadcast_threadsafe({
         "type": "new_comment",
         "post_id": post_id,
         "citizen_id": citizen_id,
         "citizen_name": citizen.name,
         "content": comment.content,
+        "parent_comment_id": parent_comment_id,
     })
     return comment
 

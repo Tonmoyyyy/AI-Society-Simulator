@@ -38,12 +38,14 @@ def create(
     age: int,
     personality_json: dict,
     job: str = "unemployed",
+    neighborhood: str = "Unknown",
 ) -> Citizen:
     citizen = Citizen(
         name=name,
         age=age,
         personality_json=personality_json,
         job=job,
+        neighborhood=neighborhood,
         # mood/happiness/energy/health/current_activity use model defaults
     )
     db.add(citizen)

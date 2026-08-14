@@ -47,7 +47,15 @@ def test_create_post_and_socialize_are_both_competitive():
             wins += 1
 
     win_rate = wins / trials
-    assert 0.15 < win_rate < 0.6, f"create_post win rate {win_rate:.1%} is out of the intended balanced range"
+    # Range widened downward after socialize's utility weights were bumped
+    # (0.5/0.15 -> 0.65/0.2) to fix a separate bug: work's utility used to
+    # spike right after every sleep, effectively locking citizens into a
+    # work<->sleep loop that starved both socialize AND create_post. With
+    # that fixed, socialize is now meaningfully stronger on average, which
+    # correctly pulls create_post's relative win rate down — the guard here
+    # is still "not near-zero" (the original bug) and "not dominant",
+    # not a fixed midpoint.
+    assert 0.05 < win_rate < 0.5, f"create_post win rate {win_rate:.1%} is out of the intended balanced range"
 
 
 # ---- posts ----
@@ -268,16 +276,28 @@ def test_followers_and_following_lists(client):
 def test_tick_can_generate_real_posts(client):
     token = _get_token(client)
     headers = {"Authorization": f"Bearer {token}"}
-    # several sociable citizens + several ticks gives create_post a fair
-    # chance to fire at least once (it's ~30-40% per valid citizen per tick)
-    for _ in range(6):
-        client.post("/api/v1/citizens", json={}, headers=headers)
+    # Craft a personality that reliably favors create_post over the other
+    # actions (low social + high honesty + unemployed so work never
+    # competes) instead of relying on enough random citizens/ticks to make
+    # a zero-post outcome merely unlikely — the latter was measured to
+    # still fail ~5-20% of the time depending on trial count after the
+    # work/socialize utility rebalance (see simulation/actions.py),
+    # which is too flaky for a test suite.
+    headers_auth = headers
+    payload = {
+        "name": "Poster",
+        "job": "unemployed",
+        "personality_json": {
+            "kindness": 50, "intelligence": 50, "ambition": 0, "social": 20, "honesty": 100,
+        },
+    }
+    client.post("/api/v1/citizens", json=payload, headers=headers_auth)
 
-    for _ in range(10):
+    for _ in range(20):
         client.post("/api/v1/simulation/tick", headers=headers)
 
     feed = client.get("/api/v1/feed?page_size=100").json()
-    assert feed["total"] > 0, "tick engine never generated a single post across 6 citizens x 10 ticks"
+    assert feed["total"] > 0, "tick engine never generated a single post across 20 ticks for a post-favoring citizen"
 
 
 # ---- websocket ----

@@ -12,6 +12,7 @@ from app.models.citizen import Citizen
 from app.repositories import memory_repo, simulation_tick_repo, social_repo
 from app.simulation import milestones
 from app.simulation.decision_pipeline import decide_and_act
+from app.simulation.gifting import perform_gift
 from app.simulation.post_content import generate_post_content
 from app.simulation.salary import calculate_salary
 from app.simulation.shopping import perform_shopping
@@ -60,6 +61,7 @@ def run_tick(db: Session) -> dict:
             if result is not None and result.memory_event == "socialized":
                 perform_social_interaction(db, citizen, citizens, broadcast_queue)
             perform_shopping(db, citizen, broadcast_queue)
+            perform_gift(db, citizen, citizens, broadcast_queue)
 
             processed += 1
 

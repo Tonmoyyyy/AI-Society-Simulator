@@ -34,4 +34,10 @@ class Citizen(Base):
     job: Mapped[str] = mapped_column(String(100), nullable=False, default="unemployed")
     current_activity: Mapped[str] = mapped_column(String(100), nullable=False, default="idle")
 
+    # Where in the city this citizen lives — cosmetic/flavor for v0.1 (no
+    # commute, rent, or district economy tied to it yet), assigned randomly
+    # at creation from simulation/neighborhoods.py unless the creator
+    # specifies one.
+    neighborhood: Mapped[str] = mapped_column(String(50), nullable=False, default="Unknown")
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

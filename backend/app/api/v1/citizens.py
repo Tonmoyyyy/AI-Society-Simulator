@@ -12,6 +12,9 @@ from app.schemas.citizen import (
 from app.schemas.simulation import MemoryOut
 from app.services import citizen_service, simulation_service
 from app.services.citizen_service import CitizenNotFound, CitizenLimitReached
+from app.simulation.jobs import JOB_NAMES
+from app.simulation.neighborhoods import NEIGHBORHOOD_NAMES
+from app.simulation.personality import TRAITS as TRAIT_NAMES
 
 router = APIRouter(prefix="/api/v1/citizens", tags=["citizens"])
 
@@ -23,7 +26,14 @@ def create_citizen(
     current_user: User = Depends(get_current_user),  # citizen creation is an authenticated action
 ):
     try:
-        citizen = citizen_service.create_citizen(db, name=payload.name, age=payload.age)
+        citizen = citizen_service.create_citizen(
+            db,
+            name=payload.name,
+            age=payload.age,
+            job=payload.job,
+            neighborhood=payload.neighborhood,
+            personality_json=payload.personality_json,
+        )
     except CitizenLimitReached as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
     return citizen
@@ -38,6 +48,18 @@ def list_citizens(
     """Public read — spectators can browse citizens without logging in."""
     items, total = citizen_service.list_citizens(db, page=page, page_size=page_size)
     return {"total": total, "items": items}
+
+
+@router.get("/options", response_model=dict)
+def get_citizen_options():
+    """Public — the valid job/neighborhood/personality-trait values, so the
+    frontend's "customize" form never hardcodes a list that could drift
+    from the backend's actual validation rules."""
+    return {
+        "jobs": ["unemployed"] + JOB_NAMES,
+        "neighborhoods": NEIGHBORHOOD_NAMES,
+        "traits": TRAIT_NAMES,
+    }
 
 
 @router.get("/{citizen_id}", response_model=CitizenOut)
@@ -62,6 +84,7 @@ def update_citizen(
             citizen_id,
             name=payload.name,
             job=payload.job,
+            neighborhood=payload.neighborhood,
             current_activity=payload.current_activity,
         )
     except CitizenNotFound as e:

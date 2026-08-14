@@ -74,8 +74,14 @@ def _work_is_valid(c: Citizen) -> bool:
 
 def _work_utility(c: Citizen) -> float:
     ambition = c.personality_json.get("ambition", 50)
-    # Wanted more by ambitious citizens, less as energy runs low.
-    return ambition * 0.6 + (c.energy * 0.2)
+    # Previously included `+ energy * 0.2`, which made work artificially
+    # stronger the more rested a citizen was — since is_valid() already
+    # requires energy > 20, that term was redundant with sleep already
+    # handling low energy, and it caused a work<->sleep lockstep loop:
+    # citizens almost never had a real chance to socialize or post because
+    # work's utility spiked right after every sleep. Dropped entirely so
+    # ambition alone drives how much a citizen wants to work.
+    return ambition * 0.7
 
 
 def _work_execute(c: Citizen) -> ActionResult:
@@ -98,12 +104,13 @@ def _socialize_is_valid(c: Citizen) -> bool:
 def _socialize_utility(c: Citizen) -> float:
     social = c.personality_json.get("social", 50)
     happiness_gap = 100 - c.happiness
-    # Weight on happiness_gap deliberately kept modest — an earlier version
-    # weighted this so heavily that "socialize" beat "create_post" over 98%
-    # of the time regardless of personality, making the social feed nearly
-    # dead. This balance keeps both actions genuinely competitive based on
-    # personality rather than one dominating by construction.
-    return social * 0.5 + happiness_gap * 0.15
+    # Bumped from 0.5/0.15 alongside the work-utility fix above (see its
+    # comment): with work no longer artificially spiking at high energy,
+    # socialize needs to be independently competitive rather than only
+    # winning in work's shadow. Verified via simulation: an average-trait
+    # employed citizen went from a 200-tick work<->sleep lockstep loop
+    # (0 socializes, 0 posts) to a mixed, lively action distribution.
+    return social * 0.65 + happiness_gap * 0.2
 
 
 def _socialize_execute(c: Citizen) -> ActionResult:

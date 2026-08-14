@@ -62,7 +62,9 @@ def add_comment(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return social_service.add_comment(db, post_id, payload.citizen_id, payload.content)
+        return social_service.add_comment(
+            db, post_id, payload.citizen_id, payload.content, parent_comment_id=payload.parent_comment_id
+        )
     except PostNotFound as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message)
     except SocialError as e:

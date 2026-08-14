@@ -125,7 +125,7 @@ def test_update_nonexistent_citizen(client):
     token = _get_token(client)
     resp = client.patch(
         "/api/v1/citizens/999999",
-        json={"job": "ghost"},
+        json={"job": "teacher"},  # must be a valid job now that job values are validated (see schemas/citizen.py) — a bogus job would 422 before ever reaching the not-found check
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 404

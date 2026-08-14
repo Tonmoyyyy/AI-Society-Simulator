@@ -69,6 +69,28 @@ def get_trending_posts(db: Session, limit: int = 5, window: int = 50) -> list[di
     return top
 
 
+def get_leaderboard(db: Session, limit: int = 20) -> list[dict]:
+    """Every citizen's wallet balance, richest first — citizens with no
+    wallet yet (never worked/earned) show as $0.00, not omitted, so the
+    view genuinely represents "who has how much" rather than only
+    showing citizens who've already earned something."""
+    citizens = db.query(Citizen).all()
+    from app.repositories import wallet_repo
+    rows = []
+    for citizen in citizens:
+        wallet = wallet_repo.get_by_citizen_id(db, citizen.id)
+        balance = wallet.balance if wallet else 0
+        rows.append({
+            "citizen_id": citizen.id,
+            "name": citizen.name,
+            "job": citizen.job,
+            "neighborhood": citizen.neighborhood,
+            "balance": balance,
+        })
+    rows.sort(key=lambda r: r["balance"], reverse=True)
+    return rows[:limit]
+
+
 def get_timeline(db: Session, page: int, page_size: int, category: str | None = None):
     offset = (page - 1) * page_size
     return timeline_repo.list_paginated(db, offset=offset, limit=page_size, category=category)

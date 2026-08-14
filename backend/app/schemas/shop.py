@@ -33,11 +33,11 @@ class ShopCreate(BaseModel):
 
 
 class PurchaseOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     citizen_id: int
     shop_id: int
+    shop_name: str
     product_id: int
+    product_name: str
     price: Decimal
     created_at: datetime
