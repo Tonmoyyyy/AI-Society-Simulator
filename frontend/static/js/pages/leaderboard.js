@@ -33,6 +33,7 @@
           <div class="d-flex justify-content-between align-items-center py-2${i > 0 ? " border-top" : ""}">
             <div class="d-flex align-items-center gap-3">
               <span class="mono text-ink-faint" style="width:2.2rem; text-align:center;">${medal(i + 1)}</span>
+              ${AsimAvatar.plainImg(e.citizen_id, 40)}
               <div>
                 <a href="citizen.html?id=${e.citizen_id}" class="fw-semibold" style="font-family: var(--font-display); color: var(--ink);">${escapeHtml(e.name)}</a>
                 <div class="text-ink-faint small">${escapeHtml(e.job)} · ${escapeHtml(e.neighborhood)}</div>

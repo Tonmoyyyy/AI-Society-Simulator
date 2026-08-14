@@ -33,8 +33,11 @@
     return `
       <div class="col-sm-6 col-lg-4">
         <div class="citizen-card h-100" data-citizen-id="${c.id}" data-citizen-name="${escapeHtml(c.name)}">
-          <div class="d-flex justify-content-between align-items-start mb-1">
-            <div class="citizen-name">${escapeHtml(c.name)}</div>
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <div class="d-flex align-items-center gap-2">
+              ${AsimAvatar.ringedImg(c.id, c.current_activity, 44)}
+              <div class="citizen-name">${escapeHtml(c.name)}</div>
+            </div>
             <span class="badge-activity ${activityClass(c.current_activity)}">${escapeHtml(c.current_activity)}</span>
           </div>
           <div class="citizen-meta mb-2">Age ${c.age} · ${escapeHtml(c.job)} · ${escapeHtml(c.neighborhood || "")}</div>

@@ -87,6 +87,7 @@
       ]);
 
       document.getElementById("c-name").textContent = citizen.name;
+      document.getElementById("c-avatar").innerHTML = AsimAvatar.ringedImg(citizen.id, citizen.current_activity, 72);
       document.getElementById("c-age").textContent = citizen.age;
       document.getElementById("c-job").textContent = citizen.job;
       document.getElementById("c-neighborhood").textContent = citizen.neighborhood || "";

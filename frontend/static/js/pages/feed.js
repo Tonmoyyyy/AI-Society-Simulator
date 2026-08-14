@@ -26,14 +26,17 @@
   function postHtml(post, isNew) {
     return `
       <div class="feed-post${isNew ? " is-new" : ""}" data-post-id="${post.id}">
-        <div class="d-flex justify-content-between align-items-baseline">
-          <span class="post-author">${escapeHtml(post.citizen_name)}</span>
-          <span class="post-time">${timeAgo(post.created_at)}</span>
-        </div>
-        <div class="post-content">${escapeHtml(post.content)}</div>
-        <div class="post-actions">
-          <span>💬 ${post.comment_count}</span>
-          <span>❤ ${post.reaction_count}</span>
+        ${AsimAvatar.plainImg(post.citizen_id, 40)}
+        <div class="flex-grow-1">
+          <div class="d-flex justify-content-between align-items-baseline">
+            <span class="post-author">${escapeHtml(post.citizen_name)}</span>
+            <span class="post-time">${timeAgo(post.created_at)}</span>
+          </div>
+          <div class="post-content">${escapeHtml(post.content)}</div>
+          <div class="post-actions">
+            <span>💬 ${post.comment_count}</span>
+            <span>❤ ${post.reaction_count}</span>
+          </div>
         </div>
       </div>`;
   }
@@ -82,6 +85,7 @@
 
     const fakePost = {
       id: msg.post_id,
+      citizen_id: msg.citizen_id,
       citizen_name: msg.citizen_name,
       content: msg.content,
       created_at: new Date().toISOString().replace("Z", ""),

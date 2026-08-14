@@ -26,30 +26,33 @@ const AsimNav = (() => {
     const email = typeof Auth !== "undefined" ? Auth.getEmail() : null;
 
     mount.innerHTML = `
-      <nav class="asim-nav">
-        <div class="container-fluid px-3 px-md-4">
-          <div class="d-flex align-items-center justify-content-between py-2 flex-wrap gap-2">
-            <div class="d-flex align-items-center gap-4 flex-wrap">
-              <a href="dashboard.html" class="brand">
-                <span>AI Society Simulator</span>
-              </a>
-              <div class="d-none d-md-flex gap-1">${linksHtml}</div>
+      <div class="asim-nav-wrap">
+        <nav class="asim-nav">
+          <div class="container-fluid px-2">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <div class="d-flex align-items-center gap-4 flex-wrap">
+                <a href="dashboard.html" class="brand">
+                  <span class="brand-dot"></span>
+                  <span>AI Society</span>
+                </a>
+                <div class="d-none d-md-flex gap-1">${linksHtml}</div>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <span class="sim-pulse" title="Live feed connection">
+                  <span class="dot"></span><span class="pulse-label">Offline</span>
+                </span>
+                ${
+                  email
+                    ? `<span class="text-ink-faint small d-none d-sm-inline">${email}</span>
+                       <button id="asim-logout-btn" class="btn btn-sm btn-outline-asim">Log out</button>`
+                    : `<a href="login.html" class="btn btn-sm btn-asim-amber">Log in</a>`
+                }
+              </div>
             </div>
-            <div class="d-flex align-items-center gap-3">
-              <span class="sim-pulse" title="Live feed connection">
-                <span class="dot"></span><span class="pulse-label">Offline</span>
-              </span>
-              ${
-                email
-                  ? `<span class="text-ink-faint small d-none d-sm-inline">${email}</span>
-                     <button id="asim-logout-btn" class="btn btn-sm btn-outline-asim">Log out</button>`
-                  : `<a href="login.html" class="btn btn-sm btn-asim-amber">Log in</a>`
-              }
-            </div>
+            <div class="d-flex d-md-none gap-1 pt-2 flex-wrap">${linksHtml}</div>
           </div>
-          <div class="d-flex d-md-none gap-1 pb-2">${linksHtml}</div>
-        </div>
-      </nav>
+        </nav>
+      </div>
     `;
 
     const logoutBtn = document.getElementById("asim-logout-btn");
