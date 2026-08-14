@@ -20,7 +20,10 @@
       <h1 class="h3 mb-1">Citizens</h1>
       <p class="text-ink-soft mb-0" id="citizen-count-sub">Loading…</p>
     </div>
-    <button id="create-citizen-btn" class="btn btn-asim-amber">Add a citizen</button>
+    <div class="d-flex gap-2">
+      <button id="create-citizen-btn" class="btn btn-outline-asim">+ Random citizen</button>
+      <button id="customize-citizen-btn" class="btn btn-asim-amber" data-bs-toggle="modal" data-bs-target="#customize-modal">Customize &amp; add</button>
+    </div>
   </div>
 
   <div id="citizens-feedback" class="mb-3"></div>
@@ -32,6 +35,57 @@
   <nav class="mt-4" id="citizens-pagination"></nav>
 
 </main>
+
+<!-- Customize & add citizen modal -->
+<div class="modal fade" id="customize-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title font-display">Customize a new citizen</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="customize-error" class="alert-asim-error mb-3 d-none"></div>
+        <form id="customize-form">
+          <div class="row g-2 mb-2">
+            <div class="col-8">
+              <label class="form-label small text-ink-soft">Name (optional)</label>
+              <input type="text" class="form-control" id="cust-name" maxlength="100" placeholder="Randomized if blank" />
+            </div>
+            <div class="col-4">
+              <label class="form-label small text-ink-soft">Age</label>
+              <input type="number" class="form-control" id="cust-age" min="0" max="120" placeholder="Random" />
+            </div>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label small text-ink-soft">Job</label>
+              <select class="form-select" id="cust-job">
+                <option value="">Random</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-ink-soft">Neighborhood</label>
+              <select class="form-select" id="cust-neighborhood">
+                <option value="">Random</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="cust-personality-toggle">
+            <label class="form-check-label small" for="cust-personality-toggle">Customize personality (otherwise randomized)</label>
+          </div>
+          <div id="cust-personality-sliders" class="d-none">
+            <div id="cust-traits"></div>
+          </div>
+
+          <button type="submit" class="btn btn-asim-primary w-100 mt-3">Add citizen</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Citizen detail modal -->
 <div class="modal fade" id="citizen-detail-modal" tabindex="-1">

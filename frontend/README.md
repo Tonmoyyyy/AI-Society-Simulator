@@ -42,7 +42,8 @@ even for a static site.
 |---|---|---|
 | `pages/login.html` | — | Sign up or log in (JWT stored in `localStorage`) |
 | `pages/dashboard.html` | Read: no. "Run one tick": yes | Population/wellbeing stats, wellbeing chart, trending posts, recent history, manual tick trigger |
-| `pages/citizens.html` | Read: no. "Add a citizen": yes | Browsable roster with personality trait bars, paginated |
+| `pages/citizens.html` | Read: no. "Add a citizen": yes | Browsable roster with personality trait bars, paginated; click a card to open its profile |
+| `pages/citizen.html?id=N` | No | Full profile — stats, personality bars, wallet balance + recent purchases, recent memories; auto-refreshes when a WS event mentions this citizen |
 | `pages/feed.html` | Read: no. (posting is via the tick engine, not a UI form in v0.1) | Live feed — new posts from ticks appear at the top automatically over WebSocket |
 | `pages/shops.html` | Read: no. Creating a shop/product: yes | Marketplace — every shop and its products; new shops/products via modal forms; live "just bought" notices over WebSocket |
 | `pages/timeline.html` | No | Simulation history — population milestones, wealth changes, happiness crises/recoveries, filterable by category |

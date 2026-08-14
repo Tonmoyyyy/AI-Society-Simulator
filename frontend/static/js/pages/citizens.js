@@ -37,7 +37,7 @@
             <div class="citizen-name">${escapeHtml(c.name)}</div>
             <span class="badge-activity ${activityClass(c.current_activity)}">${escapeHtml(c.current_activity)}</span>
           </div>
-          <div class="citizen-meta mb-2">Age ${c.age} · ${escapeHtml(c.job)}</div>
+          <div class="citizen-meta mb-2">Age ${c.age} · ${escapeHtml(c.job)} · ${escapeHtml(c.neighborhood || "")}</div>
           <div class="d-flex gap-3 small text-ink-soft mb-2 mono" style="font-size:0.76rem;">
             <span title="Happiness">😊 ${Math.round(c.happiness)}</span>
             <span title="Energy">⚡ ${Math.round(c.energy)}</span>
@@ -88,6 +88,12 @@
         grid.innerHTML = `<div class="col-12"><div class="empty-state">No citizens yet. Add the first one to start the simulation.</div></div>`;
       } else {
         grid.innerHTML = result.items.map(citizenCard).join("");
+        grid.querySelectorAll(".citizen-card").forEach((card) => {
+          card.style.cursor = "pointer";
+          card.addEventListener("click", () => {
+            window.location.href = `citizen.html?id=${card.dataset.citizenId}`;
+          });
+        });
       }
       renderPagination(result.total);
     } catch (err) {
@@ -114,5 +120,102 @@
     }
   });
 
+  // ---- Customize & add modal ----
+
+  async function populateCustomizeOptions() {
+    const jobSelect = document.getElementById("cust-job");
+    const neighborhoodSelect = document.getElementById("cust-neighborhood");
+    try {
+      const options = await CitizensApi.options();
+      (options.jobs || []).forEach((job) => {
+        const opt = document.createElement("option");
+        opt.value = job;
+        opt.textContent = job;
+        jobSelect.appendChild(opt);
+      });
+      (options.neighborhoods || []).forEach((n) => {
+        const opt = document.createElement("option");
+        opt.value = n;
+        opt.textContent = n;
+        neighborhoodSelect.appendChild(opt);
+      });
+    } catch (_) {
+      // non-fatal — "Random" is still selectable, form still usable
+    }
+  }
+
+  const TRAIT_LABELS = {
+    kindness: "Kindness", intelligence: "Intelligence", ambition: "Ambition",
+    social: "Social", honesty: "Honesty",
+  };
+
+  function renderPersonalitySliders() {
+    const container = document.getElementById("cust-traits");
+    container.innerHTML = TRAIT_ORDER.map(
+      (t) => `
+      <div class="mb-2">
+        <div class="d-flex justify-content-between">
+          <label class="small text-ink-soft" for="cust-trait-${t}">${TRAIT_LABELS[t]}</label>
+          <span class="small mono" id="cust-trait-${t}-val">50</span>
+        </div>
+        <input type="range" class="form-range" id="cust-trait-${t}" min="0" max="100" value="50" />
+      </div>`
+    ).join("");
+    TRAIT_ORDER.forEach((t) => {
+      const slider = document.getElementById(`cust-trait-${t}`);
+      const val = document.getElementById(`cust-trait-${t}-val`);
+      slider.addEventListener("input", () => (val.textContent = slider.value));
+    });
+  }
+
+  document.getElementById("cust-personality-toggle").addEventListener("change", (e) => {
+    const box = document.getElementById("cust-personality-sliders");
+    box.classList.toggle("d-none", !e.target.checked);
+    if (e.target.checked && !box.dataset.rendered) {
+      renderPersonalitySliders();
+      box.dataset.rendered = "1";
+    }
+  });
+
+  document.getElementById("customize-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!Auth.isLoggedIn()) {
+      window.location.href = "login.html";
+      return;
+    }
+    const errorBox = document.getElementById("customize-error");
+    errorBox.classList.add("d-none");
+
+    const fields = {};
+    const name = document.getElementById("cust-name").value.trim();
+    const age = document.getElementById("cust-age").value;
+    const job = document.getElementById("cust-job").value;
+    const neighborhood = document.getElementById("cust-neighborhood").value;
+    if (name) fields.name = name;
+    if (age) fields.age = parseInt(age, 10);
+    if (job) fields.job = job;
+    if (neighborhood) fields.neighborhood = neighborhood;
+
+    if (document.getElementById("cust-personality-toggle").checked) {
+      fields.personality_json = {};
+      TRAIT_ORDER.forEach((t) => {
+        fields.personality_json[t] = parseInt(document.getElementById(`cust-trait-${t}`).value, 10);
+      });
+    }
+
+    try {
+      const citizen = await CitizensApi.create(fields);
+      showFeedback(`${citizen.name} joined the simulation.`, false);
+      bootstrap.Modal.getInstance(document.getElementById("customize-modal")).hide();
+      document.getElementById("customize-form").reset();
+      currentPage = 1;
+      await loadCitizens();
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.classList.remove("d-none");
+    }
+  });
+
+  populateCustomizeOptions();
   loadCitizens();
 })();

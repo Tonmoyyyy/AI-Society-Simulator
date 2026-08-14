@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Citizen — AI Society Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+<link rel="stylesheet" href="../static/css/custom.css" />
+</head>
+<body>
+
+<div id="asim-nav"></div>
+
+<main class="container-fluid px-3 px-md-4 py-4" style="max-width: 1000px;">
+
+  <a href="citizens.html" class="small d-inline-block mb-3">&larr; Back to citizens</a>
+
+  <div id="citizen-loading" class="text-ink-faint">Loading…</div>
+  <div id="citizen-error" class="alert-asim-error d-none"></div>
+
+  <div id="citizen-content" class="d-none">
+
+    <!-- Header -->
+    <div class="asim-card mb-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <h1 class="h3 mb-1" id="c-name"></h1>
+          <p class="text-ink-soft mb-0"><span id="c-age"></span> years old · <span id="c-job"></span> · <span id="c-neighborhood"></span></p>
+        </div>
+        <span class="badge-activity" id="c-activity" style="font-size:0.78rem; padding:0.35rem 0.75rem;"></span>
+      </div>
+
+      <div class="row g-3 mt-2">
+        <div class="col-6 col-md-3">
+          <div class="stat-label">Happiness</div>
+          <div class="stat-value" style="font-size:1.4rem;" id="c-happiness">—</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="stat-label">Energy</div>
+          <div class="stat-value" style="font-size:1.4rem;" id="c-energy">—</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="stat-label">Health</div>
+          <div class="stat-value" style="font-size:1.4rem;" id="c-health">—</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="stat-label">Mood</div>
+          <div class="stat-value" style="font-size:1.4rem;" id="c-mood">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <!-- Personality -->
+      <div class="col-md-6">
+        <div class="asim-card h-100">
+          <h2 class="h6 mb-3">Personality</h2>
+          <div id="c-traits"></div>
+        </div>
+      </div>
+
+      <!-- Wallet -->
+      <div class="col-md-6">
+        <div class="asim-card h-100">
+          <h2 class="h6 mb-3">Wallet</h2>
+          <div class="stat-value mb-3" id="c-balance">—</div>
+          <div class="text-ink-faint small mb-2">Recent purchases</div>
+          <div id="c-purchases">
+            <div class="text-ink-faint small">Loading…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Manage: assign job + send money -->
+      <div class="col-md-6">
+        <div class="asim-card h-100">
+          <h2 class="h6 mb-3">Manage</h2>
+          <div id="manage-login-notice" class="text-ink-faint small d-none">
+            <a href="login.html">Log in</a> to assign a job or send money for this citizen.
+          </div>
+          <div id="manage-controls">
+            <div id="manage-feedback" class="mb-2"></div>
+
+            <label class="form-label small text-ink-soft" for="assign-job-select">Job</label>
+            <div class="d-flex gap-2 mb-3">
+              <select class="form-select form-select-sm" id="assign-job-select">
+                <option value="unemployed">unemployed</option>
+              </select>
+              <button class="btn btn-sm btn-outline-asim" id="assign-job-btn">Save</button>
+            </div>
+
+            <label class="form-label small text-ink-soft">Send money to another citizen</label>
+            <div class="d-flex gap-2">
+              <input type="number" class="form-control form-control-sm" id="transfer-to-id" placeholder="Citizen ID" style="max-width:110px;" />
+              <input type="number" class="form-control form-control-sm" id="transfer-amount" placeholder="Amount" min="0.01" step="0.01" />
+              <button class="btn btn-sm btn-asim-amber" id="transfer-btn">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Memories -->
+      <div class="col-md-6">
+        <div class="asim-card h-100">
+          <h2 class="h6 mb-3">Recent memories</h2>
+          <div id="c-memories">
+            <div class="text-ink-faint small">Loading…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+
+<script src="../static/js/config.js"></script>
+<script src="../static/js/api/client.js"></script>
+<script src="../static/js/api/auth.js"></script>
+<script src="../static/js/api/citizens.js"></script>
+<script src="../static/js/websocket.js"></script>
+<script src="../static/js/nav.js"></script>
+<script src="../static/js/pages/citizen.js"></script>
+</body>
+</html>
