@@ -1,0 +1,559 @@
+/* ==========================================================================
+   world.css — the 3D world / map page (World Phases 3–8)
+   --------------------------------------------------------------------------
+   Scoped entirely to `world-*` classes so it cannot affect any existing page.
+   It is loaded AFTER custom.css and reuses that file's design tokens
+   (--ink, --glass, --accent-*, --font-*, --radius-*) rather than inventing a
+   second palette — the map is meant to look like part of the dashboard, not
+   like a game bolted onto the side of it.
+
+   Nothing here hardcodes a district or building colour. Those come from the
+   backend legend (/api/v1/world/legend) and are applied as inline styles, so
+   adding a type on the server needs no CSS change.
+   ========================================================================== */
+
+/* The map fills the viewport, so this page — unlike the scrolling dashboard —
+   manages its own height and must not bounce-scroll on the body. */
+.world-body {
+  overflow: hidden;
+}
+
+.world-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem 1rem;
+  /* 100vh minus the shared nav's height. dvh where supported, so mobile browser
+     chrome appearing/disappearing doesn't crop the canvas. */
+  height: calc(100vh - 74px);
+  height: calc(100dvh - 74px);
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* ------------------------------------------------------------------ header */
+
+.world-header {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  padding: 0.85rem 1.15rem;
+  flex: 0 0 auto;
+}
+
+.world-header-title {
+  min-width: 150px;
+}
+
+.world-title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--ink);
+}
+
+.world-subtitle {
+  font-size: 0.78rem;
+  margin: 0.1rem 0 0;
+}
+
+#world-status.is-error {
+  color: var(--danger);
+}
+
+/* Header stat strip. Auto-fit rather than a fixed column count, because the
+   President cell only appears once the Government system exists. */
+.world-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.35rem;
+  flex: 1 1 auto;
+}
+
+.world-stat {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.world-stat-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.world-stat-value {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.world-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.world-select {
+  width: auto;
+  min-width: 170px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  padding: 0.4rem 2rem 0.4rem 0.9rem;
+}
+
+.world-select:focus {
+  border-color: var(--accent-solid);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.world-event {
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  margin: 0;
+  flex: 0 0 auto;
+  /* One line only — a long milestone title must not push the canvas down. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.world-event:empty {
+  display: none;
+}
+
+.world-notices {
+  flex: 0 0 auto;
+}
+
+.world-notices:empty {
+  display: none;
+}
+
+.world-alert {
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  color: #8a5b06;
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.75rem;
+  font-size: 0.78rem;
+  margin-bottom: 0.35rem;
+}
+
+.world-alert strong {
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------- stage */
+
+.world-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 0.65rem;
+  /* min-height:0 is what actually lets the canvas shrink inside a flex column;
+     without it the grid row takes its content height and the canvas overflows. */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.world-viewport {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  min-height: 0;
+  /* The WebGL canvas is opaque, so the glass blur behind it would be wasted
+     GPU work every frame. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: #dfe7f5; /* matches SKY_COLOR in scene.js, so no flash on load */
+}
+
+.world-canvas {
+  position: absolute;
+  inset: 0;
+  /* "grab" until the picker swaps it to "pointer" over something clickable. */
+  cursor: grab;
+}
+
+.world-canvas canvas {
+  display: block;
+}
+
+/* ------------------------------------------------------------------ labels */
+
+.world-label-host,
+.world-labels {
+  position: absolute;
+  inset: 0;
+  /* Critical: labels are DOM nodes floating over the canvas. Without this they
+     would intercept the pointer and break orbiting and picking entirely. */
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.world-label {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  padding: 0.14rem 0.6rem;
+  white-space: nowrap;
+  /* Labels are positioned by CSS2DRenderer via transform; a shadow reads better
+     than an outline against both grass and rooftops. */
+  box-shadow: 0 2px 8px -2px rgba(20, 23, 31, 0.25);
+  user-select: none;
+}
+
+.world-label-capital {
+  background: rgba(255, 252, 242, 0.9);
+  border-color: rgba(217, 201, 143, 0.9);
+  font-size: 0.78rem;
+}
+
+.world-label-landmark {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 0.72rem;
+  background: rgba(20, 23, 31, 0.82);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* ------------------------------------------------- hover readout + hint bar */
+
+.world-hover {
+  position: absolute;
+  top: 0.7rem;
+  left: 0.7rem;
+  max-width: 60%;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--ink);
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  padding: 0.3rem 0.8rem;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.world-hover.is-visible {
+  opacity: 1;
+}
+
+.world-hint {
+  position: absolute;
+  bottom: 0.55rem;
+  right: 0.8rem;
+  margin: 0;
+  font-size: 0.7rem;
+  pointer-events: none;
+  background: var(--glass-strong);
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.7rem;
+}
+
+/* ------------------------------------------------------------------ legend */
+
+.world-legend-host {
+  position: absolute;
+  bottom: 0.6rem;
+  left: 0.6rem;
+  max-width: 220px;
+}
+
+.world-legend {
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--glass-shadow);
+  font-size: 0.72rem;
+}
+
+.world-legend > summary {
+  cursor: pointer;
+  padding: 0.35rem 0.7rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  list-style: none;
+}
+
+.world-legend > summary::-webkit-details-marker {
+  display: none;
+}
+
+.world-legend > summary::after {
+  content: "▾";
+  float: right;
+  color: var(--ink-faint);
+}
+
+.world-legend:not([open]) > summary::after {
+  content: "▸";
+}
+
+.world-legend-body {
+  padding: 0 0.7rem 0.55rem;
+  /* The legend grows with the number of backend types, so cap it and scroll
+     rather than letting it cover the map. */
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.world-legend-head {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  font-weight: 700;
+  margin: 0.45rem 0 0.2rem;
+}
+
+.world-legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.world-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.09rem 0;
+  color: var(--ink-soft);
+}
+
+.world-legend-icon {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.world-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(20, 23, 31, 0.12);
+}
+
+/* ------------------------------------------------------------------- panel */
+
+.world-panel {
+  padding: 1.05rem 1.15rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.world-panel-empty {
+  text-align: center;
+  padding: 2.5rem 0.5rem;
+  color: var(--ink-faint);
+}
+
+.world-panel-empty-icon {
+  font-size: 2rem;
+  opacity: 0.55;
+  margin-bottom: 0.5rem;
+}
+
+.world-card-kind {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-weight: 700;
+  color: var(--accent-solid);
+  margin-bottom: 0.2rem;
+}
+
+.world-card-title {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.world-card-title-serif {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.world-card-sub {
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  margin: 0.15rem 0 0;
+}
+
+.world-card-desc {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin: 0.55rem 0 0.35rem;
+  line-height: 1.5;
+}
+
+.world-note {
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  background: var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  margin: 0.6rem 0 0;
+  line-height: 1.45;
+}
+
+/* ---- key/value rows ---- */
+
+.world-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.34rem 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 0.79rem;
+}
+
+.world-row:last-of-type {
+  border-bottom: none;
+}
+
+.world-row-label {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+.world-row-value {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* ---- meters (mood / happiness) ---- */
+
+.world-meter {
+  margin: 0.55rem 0;
+}
+
+.world-meter-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.world-meter-track {
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.world-meter-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent-grad);
+  transition: width 0.35s ease;
+}
+
+/* ---- activity pill + badges ---- */
+
+.world-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  padding: 0.25rem 0.7rem;
+  margin: 0.7rem 0 0.3rem;
+  background: var(--line-soft);
+  color: var(--ink-soft);
+  text-transform: capitalize;
+}
+
+/* Matches MARKER_WORKING in builders.js, so the pill and the 3D marker agree
+   about what "at work" looks like. */
+.world-activity.is-working {
+  background: rgba(245, 166, 35, 0.16);
+  color: #8a5b06;
+}
+
+.world-badge {
+  display: inline-block;
+  margin-top: 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  padding: 0.25rem 0.75rem;
+  background: rgba(217, 201, 143, 0.28);
+  border: 1px solid rgba(217, 201, 143, 0.7);
+  color: #6b5a1e;
+}
+
+/* --------------------------------------------------------------- responsive */
+
+/* Below this width the side-by-side split leaves the canvas too narrow to
+   orbit in, so the panel drops underneath and the page starts scrolling. */
+@media (max-width: 991px) {
+  .world-body {
+    overflow: auto;
+  }
+
+  .world-shell {
+    height: auto;
+  }
+
+  .world-stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .world-viewport {
+    height: 62vh;
+  }
+
+  .world-panel {
+    max-height: none;
+  }
+
+  .world-legend-host {
+    max-width: 170px;
+  }
+
+  .world-hint {
+    display: none;
+  }
+}
+
+/* Respect the OS "reduce motion" setting for the parts that are decoration.
+   The camera fly-to and the flag wave are motion the user didn't ask for; the
+   citizen markers moving are data, so those are left alone. */
+@media (prefers-reduced-motion: reduce) {
+  .world-meter-fill,
+  .world-hover {
+    transition: none;
+  }
+}

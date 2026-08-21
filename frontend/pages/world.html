@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>World — AI Society Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+<link rel="stylesheet" href="../static/css/custom.css" />
+<link rel="stylesheet" href="../static/css/world.css" />
+
+<!--
+  Three.js via import map — the ONE thing this page does differently from every
+  other page in the app.
+
+  Why an import map instead of a bundler: the world modules use bare specifiers
+  (`import * as THREE from "three"`), which is the form every Three.js example
+  and doc snippet uses. An import map lets the browser resolve those to CDN URLs
+  natively, so the project still has no build step (§22 — keep this manageable
+  for a solo developer).
+
+  Why the module build and not three.min.js: the non-module global build is
+  deprecated, and OrbitControls / CSS2DRenderer under examples/jsm are ES
+  modules that themselves `import ... from "three"` — they only resolve if
+  "three" is mapped. The trailing slash on "three/addons/" makes it a prefix
+  map, so every addon path resolves from one entry.
+
+  The version is pinned deliberately: an unpinned CDN range would let a future
+  Three.js release change API behaviour under a working map. This must stay in
+  sync with the version noted in static/js/world/scene.js.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+
+<body class="world-body">
+<div id="asim-nav"></div>
+
+<main class="world-shell">
+
+  <!-- ---------------------------------------------------------------- header -->
+  <header class="world-header asim-card">
+    <div class="world-header-title">
+      <h1 class="world-title font-display">The World</h1>
+      <p class="world-subtitle text-ink-faint">
+        <span id="world-status">Starting up…</span>
+      </p>
+    </div>
+
+    <div id="world-stats" class="world-stats"></div>
+
+    <div class="world-actions">
+      <label class="visually-hidden" for="world-city-select">Focus a city</label>
+      <select id="world-city-select" class="form-select form-select-sm world-select">
+        <option value="">Entire society</option>
+      </select>
+      <button id="world-reset-btn" type="button" class="btn btn-sm btn-outline-asim">
+        Whole society
+      </button>
+      <button id="world-refresh-btn" type="button" class="btn btn-sm btn-outline-asim">
+        Reload
+      </button>
+      <button id="world-generate-btn" type="button" class="btn btn-sm btn-asim-primary">
+        Generate world
+      </button>
+    </div>
+  </header>
+
+  <p id="world-event" class="world-event mono"></p>
+  <div id="world-notice" class="world-notices"></div>
+
+  <!-- ------------------------------------------------------------- the world -->
+  <div class="world-stage">
+
+    <div class="world-viewport asim-card">
+      <!--
+        A DIV, not a <canvas>: scene.js creates the WebGL canvas itself and
+        appends it here, because the renderer owns its own drawing surface and
+        its pixel ratio. This element is just the sized box it lives in, and
+        the one the ResizeObserver in main.js watches.
+      -->
+      <div id="world-canvas" class="world-canvas"></div>
+
+      <!--
+        Overlay for the CSS2DRenderer's label layer (city names, landmark
+        names). Separate from the canvas host so it can sit above the WebGL
+        surface with pointer-events disabled — labels must never swallow a
+        click meant for the map underneath.
+      -->
+      <div id="world-label-host" class="world-label-host" aria-hidden="true"></div>
+
+      <div id="world-hover" class="world-hover" role="status" aria-live="polite"></div>
+      <div id="world-legend-host" class="world-legend-host"></div>
+
+      <p class="world-hint text-ink-faint">
+        Drag to orbit · scroll to zoom · click anything to inspect it
+      </p>
+    </div>
+
+    <aside id="world-panel" class="world-panel asim-card" aria-label="Selection details"></aside>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="../static/js/config.js"></script>
+<script src="../static/js/api/client.js"></script>
+<script src="../static/js/api/auth.js"></script>
+<script src="../static/js/api/world.js"></script>
+<script src="../static/js/websocket.js"></script>
+<script src="../static/js/nav.js"></script>
+
+<!--
+  The page script is the ONLY module here. Classic scripts above all finish
+  executing before any module does (modules are deferred by spec), so by the
+  time main.js runs, `WorldApi`, `Auth`, `apiFetch`, `AsimNav` and `AsimSocket`
+  are all defined and readable by bare name — top-level `const` in a classic
+  script lands in the shared global lexical scope.
+-->
+<script type="module" src="../static/js/world/main.js"></script>
+</body>
+</html>
