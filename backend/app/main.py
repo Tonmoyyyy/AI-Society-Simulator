@@ -12,11 +12,14 @@ from app.api.v1 import shop as shop_routes
 from app.api.v1 import simulation as simulation_routes
 from app.api.v1 import social as social_routes
 from app.api.v1 import wallet as wallet_routes  # <-- আগে বাদ পড়ে গিয়েছিল
+from app.api.v1 import world as world_routes
 from app.core.config import settings
 from app.core.error_handlers import register_error_handlers
 from app.db.base import Base  # ডাটাবেজ মডেলের Base ইমপোর্ট
 from app.db.session import engine, SessionLocal  # SQLAlchemy engine ইমপোর্ট
 from app.simulation.seed_shops import ensure_seed_shops
+from app.services.world_generation_service import ensure_world_generated
+from app.services.world_service import ensure_seed_world
 from app.websocket.connection_manager import manager
 
 
@@ -49,6 +52,39 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         print(f"[startup] Skipping shop seed (DB not reachable yet?): {exc}")
 
+    # Seed the default world (cities + districts) so the Society Map isn't
+    # empty out of the box. Idempotent — a no-op once any city exists, which
+    # is what makes admin city renames permanent across restarts. Same
+    # resilience pattern as the two steps above.
+    def _seed_world():
+        db = SessionLocal()
+        try:
+            ensure_seed_world(db)
+        finally:
+            db.close()
+
+    try:
+        await run_in_threadpool(_seed_world)
+    except Exception as exc:
+        print(f"[startup] Skipping world seed (DB not reachable yet?): {exc}")
+
+    # Lay out the world's geometry — buildings, citizen homes and roads —
+    # so the 3D map has something to draw on first boot. Also idempotent:
+    # a no-op the moment any building row exists, so it does NOT re-roll the
+    # world on every restart and a citizen's house never moves. Runs after the
+    # world seed above because it needs the cities/districts to exist.
+    def _generate_world():
+        db = SessionLocal()
+        try:
+            ensure_world_generated(db)
+        finally:
+            db.close()
+
+    try:
+        await run_in_threadpool(_generate_world)
+    except Exception as exc:
+        print(f"[startup] Skipping world generation (DB not reachable yet?): {exc}")
+
     # ২. Websocket event loop bind
     manager.bind_loop(asyncio.get_running_loop())
     yield
@@ -77,6 +113,7 @@ app.include_router(social_routes.router)
 app.include_router(wallet_routes.router)  # <-- আগে বাদ পড়ে গিয়েছিল
 app.include_router(dashboard_routes.router)
 app.include_router(shop_routes.router)
+app.include_router(world_routes.router)
 
 
 @app.websocket("/ws/feed")

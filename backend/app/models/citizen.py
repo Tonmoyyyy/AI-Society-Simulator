@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import String, Integer, Float, DateTime, JSON, func
+from sqlalchemy import String, Integer, Float, DateTime, JSON, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -38,6 +39,27 @@ class Citizen(Base):
     # commute, rent, or district economy tied to it yet), assigned randomly
     # at creation from simulation/neighborhoods.py unless the creator
     # specifies one.
+    #
+    # KEPT AS-IS ON PURPOSE (World Phase 1): this plain string is still the
+    # column that CitizenCreate/CitizenUpdate validate against, that
+    # /api/v1/citizens/options feeds, and that the dashboard leaderboard
+    # reads. The structured world link below is additive and does not replace
+    # it — removing this would break all three.
     neighborhood: Mapped[str] = mapped_column(String(50), nullable=False, default="Unknown")
+
+    # ---- structured world location (World Phase 1) ----
+    # Nullable because every citizen that already exists predates the world
+    # tables, and because a citizen must never be un-creatable just for
+    # lacking a location. World Phase 2 backfills these; until then the map
+    # reports them via `unassigned_citizens`.
+    #
+    # ondelete="SET NULL" (see the migration): deleting a city or district
+    # must never cascade into deleting people.
+    city_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("cities.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    neighborhood_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("neighborhoods.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

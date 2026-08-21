@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.citizen import Citizen
 from app.repositories import citizen_repo
+from app.services import world_generation_service
 from app.simulation.jobs import JOB_NAMES
 from app.simulation.neighborhoods import NEIGHBORHOOD_NAMES
 from app.simulation.name_generator import generate_name
@@ -64,7 +65,7 @@ def create_citizen(
     resolved_job = job if job is not None else _assign_starting_job()
     resolved_neighborhood = neighborhood if neighborhood is not None else random.choice(NEIGHBORHOOD_NAMES)
 
-    return citizen_repo.create(
+    citizen = citizen_repo.create(
         db,
         name=resolved_name,
         age=resolved_age,
@@ -73,6 +74,26 @@ def create_citizen(
         neighborhood=resolved_neighborhood,
     )
 
+    # ---- World Phase 2 hook: give the new citizen a place to live ----
+    #
+    # Without this, a citizen created at runtime would have no city/district/
+    # house and would be invisible on the 3D map until someone ran a full
+    # regeneration. This assigns them the least-populated housing district and
+    # moves them into a vacant house.
+    #
+    # Wrapped in a bare try/except ON PURPOSE — same defensive pattern as the
+    # seeders in main.py. Placing a citizen on the map is a cosmetic
+    # convenience; it must NEVER be able to fail citizen creation, which is a
+    # core feature that predates the world system entirely. The citizen is
+    # already committed by this point, so the worst case is an unplaced citizen
+    # that the next `POST /api/v1/world/generate` picks up.
+    try:
+        world_generation_service.assign_citizen_to_world(db, citizen)
+    except Exception as exc:  # noqa: BLE001 — intentionally broad, see above
+        print(f"[citizens] Could not place citizen {citizen.id} in the world: {exc}")
+        db.rollback()
+
+    return citizen
 
 def get_citizen(db: Session, citizen_id: int) -> Citizen:
     citizen = citizen_repo.get_by_id(db, citizen_id)

@@ -27,6 +27,10 @@ from app.models import timeline_event  # noqa: F401
 from app.models import shop  # noqa: F401
 from app.models import product  # noqa: F401
 from app.models import purchase  # noqa: F401
+from app.models import city  # noqa: F401
+from app.models import neighborhood  # noqa: F401
+from app.models import building  # noqa: F401
+from app.models import road  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
