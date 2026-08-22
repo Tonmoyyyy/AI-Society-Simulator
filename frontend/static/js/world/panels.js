@@ -18,7 +18,21 @@ const ACTIVITY_ICONS = {
   idle: "\u{1F4AD}",
 };
 
-function esc(value) {
+/**
+ * Escape a string for safe interpolation into innerHTML.
+ *
+ * EXPORTED ON PURPOSE. Every string that reaches this file from the database —
+ * citizen names, city names, district names, shop names, the President's name —
+ * is ultimately user-supplied: `POST /api/v1/citizens` accepts any name up to
+ * 100 characters with no character filtering. So an unescaped interpolation is a
+ * stored-XSS hole on a page that is public and unauthenticated. main.js builds
+ * innerHTML too and imports this rather than keeping a second copy that could
+ * drift.
+ *
+ * Backend *constants* (icons, colours, legend labels from building_types.py and
+ * world_layout.py) are not user input and are interpolated directly.
+ */
+export function esc(value) {
   if (value == null) return "";
   return String(value)
     .replace(/&/g, "&amp;")
@@ -125,11 +139,17 @@ function buildingCard(building, { government }) {
   let extra = "";
   if (building.type === "presidential_palace" && government?.system_available) {
     extra =
-      row("President", esc(government.president_name || "—")) +
-      row("First Lady", esc(government.first_lady_name || "—")) +
-      (government.tax_rate != null ? row("Tax rate", `${num(government.tax_rate * 100, 1)}%`) : "");
+      row("President", esc(government.president_name || "Vacant")) +
+      row("First Lady", esc(government.first_lady_name || "Vacant")) +
+      (government.tax_rate != null ? row("Tax rate", `${num(government.tax_rate * 100, 1)}%`) : "") +
+      (government.curfew_enabled != null
+        ? row("Curfew", government.curfew_enabled ? "In effect" : "None")
+        : "");
   } else if (building.type === "presidential_palace") {
-    extra = `<p class="world-note">The Government system isn't installed yet, so there is no sitting President to show. This panel fills in automatically once it is.</p>`;
+    // system_available is false only when no government row exists at all —
+    // i.e. startup seeding never ran. An admin can create one with
+    // PATCH /api/v1/government and this panel fills in on the next poll.
+    extra = `<p class="world-note">No government has been established yet, so there is no sitting President to show. This panel fills in automatically once one exists.</p>`;
   }
 
   return `

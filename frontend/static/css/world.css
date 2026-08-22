@@ -63,8 +63,9 @@
   color: var(--danger);
 }
 
-/* Header stat strip. Auto-fit rather than a fixed column count, because the
-   President cell only appears once the Government system exists. */
+/* Header stat strip. Wraps rather than using a fixed column count, because the
+   President cell is conditional — it appears only while someone actually holds
+   the office, and disappears again if it is vacated. */
 .world-stats {
   display: flex;
   flex-wrap: wrap;

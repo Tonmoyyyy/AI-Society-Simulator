@@ -47,19 +47,33 @@ even for a static site.
 | `pages/feed.html` | Read: no. (posting is via the tick engine, not a UI form in v0.1) | Live feed — new posts from ticks appear at the top automatically over WebSocket |
 | `pages/shops.html` | Read: no. Creating a shop/product: yes | Marketplace — every shop and its products; new shops/products via modal forms; live "just bought" notices over WebSocket |
 | `pages/timeline.html` | No | Simulation history — population milestones, wealth changes, happiness crises/recoveries, filterable by category |
+| `pages/world.html` | Read: no. "Generate world": yes | The 3D society map — Three.js view of every city, district, road, building and citizen marker, with click-to-inspect info panels, a city selector and a live header that follows the simulation |
 
 Every page works read-only without logging in (citizens/dashboard/feed/
-timeline are all public API endpoints) — logging in only unlocks the
-write actions (create a citizen, trigger a tick).
+timeline/world are all public API endpoints) — logging in only unlocks the
+write actions (create a citizen, trigger a tick, generate the world).
+
+### The world map's dependencies
+
+`pages/world.html` is the only page that loads a third-party library beyond
+Bootstrap and Chart.js: **Three.js 0.160.1**, from a CDN via an
+`<script type="importmap">`, with no build step. The map's own code is split
+across `static/js/world/` — `scene.js` (camera, lights, renderer; the only file
+that imports `"three"` directly), `builders.js` (geometry), `picking.js`
+(raycasting), `panels.js` (DOM cards and the legend) and `main.js`
+(orchestration, polling, performance guards).
 
 ## What's not here yet (by design)
 
-- No citizen detail/profile page yet (click-through from the roster) —
-  next increment
 - No manual post/comment/reaction/follow UI — those exist in the API
   (Phase 4) but the UI only surfaces what the tick engine generates
   automatically; adding manual social actions is a fast follow, not core
   to watching the simulation
+- No admin UI for the government — appointing a President, setting the tax
+  rate or toggling the curfew is done through `PATCH /api/v1/government`
+  (or `POST /api/v1/government/auto-appoint`) for now. The map *reads* the
+  government live and relabels the Presidential Palace within one poll, so a
+  change made over the API is visible without a page reload
 - No wallet/transaction detail view per citizen yet
 - Config (`API_BASE`, `WS_URL`) is a single hardcoded object in
   `config.js` — fine for local dev, would need an env-based build step for

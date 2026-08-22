@@ -28,7 +28,7 @@
 import { createStage, resizeStage, flyTo, THREE } from "./scene.js";
 import { createWorldLayer } from "./builders.js";
 import { createPicker } from "./picking.js";
-import { createPanel, renderLegend } from "./panels.js";
+import { createPanel, renderLegend, esc } from "./panels.js";
 
 const REFRESH_MS = 6000;
 
@@ -44,6 +44,10 @@ let picker = null;
 let panel = null;
 let legend = null;
 let government = null;
+// The overview-only facts the notices are built from. Kept out of `renderNotices`
+// arguments because the poll re-renders the notices (the government can change
+// between loads) and the poll has no overview payload to pass.
+let worldFacts = null;
 let cities = [];
 let selected = null;
 let cityFilter = null;
@@ -139,6 +143,12 @@ async function loadWorld() {
 
     government = data.government;
     cities = allCities || [];
+    worldFacts = {
+      world_generated: data.world_generated,
+      unassigned_citizens: data.unassigned_citizens,
+      citizens_truncated: data.citizens_truncated,
+      shown_citizens: data.citizens.length,
+    };
 
     layer.build(data, legend);
     picker.clear();
@@ -147,7 +157,7 @@ async function loadWorld() {
 
     fillCitySelect(cities);
     renderStats(data.simulation);
-    renderNotices(data);
+    renderNotices();
 
     setStatus(
       data.world_generated
@@ -161,12 +171,19 @@ async function loadWorld() {
 }
 
 /**
- * Phase 7 refresh: markers and header only.
+ * Phase 7 refresh: markers, header and government only.
  *
  * Buildings and roads don't change between ticks, so re-fetching the overview
- * here would re-download the whole world every few seconds. This hits the two
- * cheap endpoints instead — /world/citizens and /world/simulation — in parallel,
- * and writes the positions straight into the existing InstancedMesh.
+ * here would re-download the whole world every few seconds. This hits the three
+ * cheap endpoints instead — /world/citizens, /world/simulation and
+ * /world/government — in parallel, and writes the positions straight into the
+ * existing InstancedMesh.
+ *
+ * WHY /world/government IS IN THE POLL: an admin appointing a President,
+ * renaming them, or changing the tax rate is a database change like any other,
+ * and leaving it out meant those edits were invisible until someone reloaded the
+ * page — while the palace panel promised the opposite. It is one row plus a name
+ * lookup, which is cheaper than the citizen fetch beside it.
  */
 async function refreshCitizens() {
   if (paused) {
@@ -175,9 +192,10 @@ async function refreshCitizens() {
   }
   const token = loadToken;
   try {
-    const [citizens, summary] = await Promise.all([
+    const [citizens, summary, gov] = await Promise.all([
       WorldApi.citizens({ cityId: cityFilter }),
       WorldApi.simulation(),
+      WorldApi.government(),
     ]);
 
     // A city switch happened mid-flight, so these markers belong to the
@@ -186,6 +204,22 @@ async function refreshCitizens() {
     if (token !== loadToken) return;
 
     layer.updateCitizens(citizens);
+
+    // Compare before assigning: on a normal tick the government is unchanged, and
+    // relabelling landmarks plus re-rendering the open panel every 6 seconds for
+    // nothing would fight with text selection in the panel.
+    const governmentChanged = JSON.stringify(gov) !== JSON.stringify(government);
+    if (governmentChanged) {
+      government = gov;
+      // Relabels the Presidential Palace in the 3D scene ("Palace — Alex")
+      // without a world rebuild.
+      layer.relabelLandmarks(government);
+      renderNotices();
+    }
+
+    // After the government assignment above, so the President row in the header
+    // reflects an appointment on the same tick it happens rather than one poll
+    // late.
     renderStats(summary);
 
     // Keep the open panel and the selection outline attached to the citizen as
@@ -197,6 +231,11 @@ async function refreshCitizens() {
         panel.render(selected, { legend, government });
         picker.reanchor(selected);
       }
+    } else if (governmentChanged && selected) {
+      // The palace card shows the President, First Lady, tax rate and curfew, so
+      // it has to follow a government change too. Buildings and districts don't
+      // move, so the record itself is still valid — only the card is redrawn.
+      panel.render(selected, { legend, government });
     }
   } catch (err) {
     // A failed refresh must not blank the map — the last good state stays on
@@ -221,11 +260,20 @@ function renderStats(summary) {
     ["Districts", s.neighborhood_count ?? "—"],
     ["Avg happiness", s.average_happiness != null ? Number(s.average_happiness).toFixed(1) : "—"],
   ];
-  // Only shown once the Government system exists — never a hardcoded name.
+  // A name, not a hardcoded string — and shown only when someone actually holds
+  // the office, which is narrower than "a government exists": an established
+  // government can sit with both offices vacant (see renderNotices).
+  //
+  // esc() IS LOAD-BEARING, NOT DECORATION: this goes into innerHTML, and
+  // president_name is a citizen name that any logged-in user can choose freely
+  // via POST /api/v1/citizens. Interpolating it raw made appointing a citizen
+  // whose name contained markup into stored XSS on this public page.
   if (government?.system_available && government.president_name) {
-    items.push(["President", government.president_name]);
+    items.push(["President", esc(government.president_name)]);
   }
 
+  // `label` is a literal from the array above and `value` is either a number or
+  // already escaped, so neither is re-escaped here.
   dom.stats.innerHTML = items
     .map(
       ([label, value]) =>
@@ -237,27 +285,51 @@ function renderStats(summary) {
   dom.event.textContent = s.current_event ? `Latest: ${s.current_event}` : "";
 }
 
-function renderNotices(data) {
+/**
+ * Rebuild the notice strip from module state.
+ *
+ * Takes no argument on purpose: the poll calls this when the government changes
+ * and has no overview payload to hand it, so the overview-derived facts are read
+ * from `worldFacts` (captured at load) and the government from `government`
+ * (refreshed every poll).
+ */
+function renderNotices() {
+  const facts = worldFacts;
+  if (!facts) return;
   const notices = [];
 
-  if (!data.world_generated) {
+  if (!facts.world_generated) {
     notices.push(
       `The world has no buildings yet. An admin can lay it out with <strong>Generate world</strong> — it's deterministic, so nothing moves on later runs.`
     );
   }
-  if (data.unassigned_citizens > 0) {
+  if (facts.unassigned_citizens > 0) {
     notices.push(
-      `${data.unassigned_citizens} citizen(s) have no home yet. Run <strong>Generate world</strong> (force) to place them.`
+      `${facts.unassigned_citizens} citizen(s) have no home yet. Run <strong>Generate world</strong> (force) to place them.`
     );
   }
-  if (data.citizens_truncated) {
+  if (facts.citizens_truncated) {
     notices.push(
-      `Only the first ${data.citizens.length} citizens are shown. Pick a single city to see the rest.`
+      `Only the first ${facts.shown_citizens} citizens are shown. Pick a single city to see the rest.`
     );
   }
-  if (data.government && !data.government.system_available) {
+  // Three distinct government states, and conflating them is what made this
+  // confusing before:
+  //
+  //   1. no government row at all  -> system_available false
+  //   2. a government exists but nobody holds office -> the state a brand-new
+  //      install lands in, because it boots before any citizen exists and the
+  //      seeder deliberately never retries (see government_service)
+  //   3. a President is in office  -> no notice; the header and palace say so
+  //
+  // State 2 used to be silent, which looked like the feature was broken.
+  if (government && !government.system_available) {
     notices.push(
-      `The Government / President / First Lady system isn't installed in this backend yet, so the palace has no name on it. The map fills that in automatically once it exists.`
+      `No government has been established, so the Presidential Palace has no name on it. An admin can appoint a President with <strong>PATCH /api/v1/government</strong>.`
+    );
+  } else if (government && !government.president_name) {
+    notices.push(
+      `The presidency is vacant. An admin can fill both offices automatically with <strong>POST /api/v1/government/auto-appoint</strong>, or choose who holds them with <strong>PATCH /api/v1/government</strong>.`
     );
   }
 
@@ -275,12 +347,15 @@ function setStatus(text, isError = false) {
 
 function fillCitySelect(list) {
   const current = dom.citySelect.value;
+  // esc() on the name: city names are admin-editable via
+  // PATCH /api/v1/world/cities/{id}, so they are database strings like any
+  // other. `is_capital` and `population` are a boolean and a count.
   dom.citySelect.innerHTML =
     `<option value="">Entire society</option>` +
     list
       .map(
         (c) =>
-          `<option value="${c.id}">${c.is_capital ? "\u{1F451} " : ""}${c.name} (${c.population})</option>`
+          `<option value="${c.id}">${c.is_capital ? "\u{1F451} " : ""}${esc(c.name)} (${c.population})</option>`
       )
       .join("");
   if (current) dom.citySelect.value = current;

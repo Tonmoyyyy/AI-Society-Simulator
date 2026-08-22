@@ -3,8 +3,12 @@
  *
  * A classic <script> like every other api/*.js file — no build step, no import
  * statements — so it keeps working exactly like CitizensApi and DashboardApi.
- * The Three.js code is loaded as an ES module and reads this off `window`,
- * which is safe because classic scripts always run before deferred modules.
+ *
+ * HOW THE ES MODULE REACHES THIS: `const WorldApi` is a global *lexical*
+ * binding, so it is visible to later scripts but is NOT a property of `window`
+ * (`window.WorldApi` is undefined). The world modules therefore just reference
+ * `WorldApi` bare, which works because classic scripts run before deferred
+ * modules — see the load-order comment in pages/world.html.
  *
  * Everything here is a thin wrapper over apiFetch. No shaping, no defaults, no
  * palette: the backend owns labels, icons and colours (GET /world/legend), so

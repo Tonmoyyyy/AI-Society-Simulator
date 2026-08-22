@@ -83,6 +83,9 @@ export function createWorldLayer(stage) {
     },
     citizenRecords: [],
     citizenMesh: null,
+    // Landmark labels, kept as { label, record } so the Presidential Palace can
+    // be relabelled when the government changes without rebuilding the world.
+    landmarkLabels: [],
     // Landmark groups with a flag or glow ring — the render loop animates only
     // these, so nothing else pays for the per-frame work.
     animated: [],
@@ -92,6 +95,7 @@ export function createWorldLayer(stage) {
 
   layer.build = (data, legend) => buildWorld(layer, stage, data, legend);
   layer.updateCitizens = (citizens) => updateCitizens(layer, citizens);
+  layer.relabelLandmarks = (government) => relabelLandmarks(layer, government);
   layer.dispose = () => disposeAll(layer);
   return layer;
 }
@@ -124,6 +128,10 @@ function disposeAll(layer) {
   layer.citizenMesh = null;
   layer.citizenRecords = [];
   layer.animated = [];
+  // The CSS2DObjects themselves were just removed from the DOM by disposeGroup,
+  // so holding these references would leak detached elements and relabel nodes
+  // that are no longer on screen.
+  layer.landmarkLabels = [];
 }
 
 // ------------------------------------------------------------------- build
@@ -294,27 +302,44 @@ function buildBuildings(layer, buildings, buildingSpecs, government) {
     layer.pick.buildings.push(mesh);
     if (mesh.userData.flag || mesh.userData.glowRing) layer.animated.push(mesh);
 
-    const labelText = landmarkLabel(b, government);
-    layer.groups.labels.add(
-      makeLabel(
-        `${b.icon} ${labelText}`,
-        b.world_x,
-        b.height + 16,
-        b.world_z,
-        "world-label world-label-landmark"
-      )
+    const label = makeLabel(
+      `${b.icon} ${landmarkLabel(b, government)}`,
+      b.world_x,
+      b.height + 16,
+      b.world_z,
+      "world-label world-label-landmark"
     );
+    layer.groups.labels.add(label);
+    layer.landmarkLabels.push({ label, record: b });
+  });
+}
+
+/**
+ * Rewrite landmark label text for a new government, in place.
+ *
+ * The alternative was rebuilding the world every time the poll noticed a new
+ * President, which would re-download and re-upload every building and road to
+ * the GPU to change one string. Only `textContent` is touched here, so no
+ * geometry, material or CSS2DObject is recreated.
+ */
+function relabelLandmarks(layer, government) {
+  layer.landmarkLabels.forEach(({ label, record }) => {
+    const text = `${record.icon} ${landmarkLabel(record, government)}`;
+    // textContent, never innerHTML: a building's `name` is admin-editable and a
+    // President's name is user-chosen, so this must not be parsed as markup.
+    if (label.element.textContent !== text) label.element.textContent = text;
   });
 }
 
 /**
  * Label text for a landmark.
  *
- * The Presidential Palace shows the sitting President's name when the
- * Government system reports one. That name is read from
- * GET /api/v1/world/government at load time — it is never hardcoded here — so
- * renaming the President from "Tonmoy" to "Alex" changes this label with no
- * frontend change, which is the requirement in §5.
+ * The Presidential Palace shows the sitting President's name when a government
+ * exists. That name arrives in the `government` block of GET /api/v1/world,
+ * which resolves it from `citizens` on every request — it is never hardcoded
+ * here and never cached server-side — so renaming the President from "Tonmoy"
+ * to "Alex" changes this label with no frontend change, which is the
+ * requirement in §5.
  */
 function landmarkLabel(building, government) {
   const base = building.name || building.label;
