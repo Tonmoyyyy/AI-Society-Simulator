@@ -201,15 +201,24 @@ class WorldGovernmentOut(BaseModel):
     """
     Government summary for the map's Presidential Palace panel.
 
-    Every field is Optional and the whole object is nullable, because the
-    Government/President/First Lady system is NOT part of this codebase yet
-    (see world_service.get_government_summary). The shape is fixed now so
-    that wiring it up later is a change in ONE service function — the
-    schema, the route and the future 3D panel all stay as they are.
+    Every field is Optional and the whole object is nullable, because a
+    government is not guaranteed to exist or to be fully staffed. Three states
+    the map has to tell apart:
 
-    Names are never hardcoded anywhere: they come from whatever the
-    government system stores, so renaming the President updates the map with
-    no frontend change.
+      * no government row at all -> `system_available` False, everything null.
+        A database that was never seeded, which includes the test suite.
+      * a government exists but an office is vacant -> `system_available` True
+        with `president_name` still null.
+      * a President is in office -> `system_available` True and a real name.
+
+    Government facts (names, tax, curfew) come from `government_service`;
+    location facts (capital, presidential district) come from the world.
+    `world_service.get_government_summary` is the one place they are merged, and
+    it is the only function that has to change if either side moves.
+
+    Names are never hardcoded anywhere: they are resolved from `citizens` on
+    every request via the FK on `governments`, so renaming the President updates
+    the map with no regeneration and no frontend change.
     """
 
     president_name: Optional[str] = None
@@ -222,7 +231,11 @@ class WorldGovernmentOut(BaseModel):
     curfew_enabled: Optional[bool] = None
     system_available: bool = Field(
         default=False,
-        description="False while the Government system is not yet installed; the map should hide government-only UI when this is false.",
+        description=(
+            "False when no government has been established at all; the map hides "
+            "government-only UI when this is false. True does NOT imply a sitting "
+            "President — check president_name for that."
+        ),
     )
 
 
@@ -246,8 +259,8 @@ class WorldOverviewOut(BaseModel):
 
     ON RESPONSE SIZE (§14 "do not return unnecessary database fields", §19)
     ----------------------------------------------------------------------
-    `citizens` uses WorldCitizenOut, not CitizenOut — 11 render-relevant fields
-    instead of the full row with personality JSON. Even so, this response grows
+    `citizens` uses WorldCitizenOut, not CitizenOut — a short list of
+    render-relevant fields instead of the full row with its personality JSON. Even so, this response grows
     with the population, so it is capped and paginated at the edges:
 
       * `?city_id=` restricts everything to one city

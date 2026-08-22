@@ -296,12 +296,17 @@ def test_district_types_route_is_not_swallowed_by_city_id(client):
     assert set(types) == set(DISTRICT_TYPES)
 
 
-def test_government_summary_reports_unavailable_system(client):
-    """The Government/President/First Lady system is not in this codebase yet.
+def test_government_summary_degrades_when_no_government_exists(client):
+    """The map must degrade gracefully rather than inventing a name.
 
-    The contract is that the map degrades gracefully rather than inventing a
-    name: system_available False, names None. When that system lands, this test
-    should be updated — it is the marker for the single wiring point.
+    The Government system now exists (see test_government.py), but a database
+    where it was never seeded — which is exactly the state under pytest, since
+    the lifespan seeder talks to MySQL — must still serve this endpoint with
+    `system_available: False` and null names, so the map hides its
+    government-only UI instead of erroring.
+
+    The positive case, where names are real and `system_available` is True,
+    is covered by test_government.py::test_world_summary_reports_real_names.
     """
     resp = client.get("/api/v1/world/government")
     assert resp.status_code == 200, resp.text

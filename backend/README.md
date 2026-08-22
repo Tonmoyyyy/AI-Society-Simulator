@@ -388,6 +388,49 @@ no longer holds. If you add your own tests that need a specific
 employment state, do the same — don't assume "just created" means
 unemployed anymore.
 
+## 12b. World / 3D map endpoints
+
+These back `frontend/pages/world.html`. Reads are public, like every other
+read in this project; the writes are admin-only.
+
+| Method | Path | Auth required | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/world` | No | Everything the map needs in one request — cities, districts, buildings, roads, citizen markers, government summary, simulation stats. Bounded by `?city_id=`, `?include_citizens=false` and `?citizen_limit=` |
+| GET | `/api/v1/world/cities` | No | Every city with its counted population — powers the city selector |
+| GET | `/api/v1/world/cities/{id}` | No | One city plus its districts |
+| GET | `/api/v1/world/neighborhoods` | No | Districts, optionally `?city_id=` |
+| GET | `/api/v1/world/buildings` | No | Generated structures. `?type=` is repeatable (`?type=house&type=shop`) |
+| GET | `/api/v1/world/buildings/{id}` | No | One building, for the click-to-inspect panel |
+| GET | `/api/v1/world/roads` | No | Road segments in absolute world coordinates |
+| GET | `/api/v1/world/citizens` | No | Citizen markers resolved for the current tick — what the map re-polls to move people between home and work |
+| GET | `/api/v1/world/simulation` | No | Just the header numbers, so a tick refresh doesn't re-send every building |
+| GET | `/api/v1/world/government` | No | Flat President / First Lady / capital / presidential-district summary for the map |
+| GET | `/api/v1/world/legend` | No | Districts + building types + road kinds with their labels, icons and colours — the frontend holds no palette of its own |
+| PATCH | `/api/v1/world/cities/{id}` | Yes (admin) | Rename a city or edit its region/description. This is why no city name is hardcoded in the frontend |
+| PATCH | `/api/v1/world/neighborhoods/{id}` | Yes (admin) | Rename a district or change its type |
+| POST | `/api/v1/world/seed` | Yes (admin) | Create the default cities/districts if none exist. Idempotent, so it can never overwrite a rename |
+| POST | `/api/v1/world/generate?force=true` | Yes (admin) | Lay out buildings, homes and roads. Deterministic — the same database always produces the same world, so a citizen's house does not move on restart. Refuses to run without `force` when geometry already exists |
+
+## 12c. Government endpoints
+
+The sitting government is a single row: who holds the two offices, plus the
+tax rate and the curfew flag. There is deliberately **no `president_name`
+column** — the row stores citizen ids and the name is resolved from `citizens`
+on every request. That is what makes renaming a citizen rename the President on
+the 3D map, with no regeneration, no cache to invalidate and no frontend change.
+
+| Method | Path | Auth required | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/government` | No | The government in full: office holders (id + name), tax rate, curfew, term start, capital city, timestamps. `404` when none has been established |
+| PATCH | `/api/v1/government` | Yes (admin) | Appoint or vacate either office, set `tax_rate` (a 0.0-1.0 **fraction**, not a percentage) or toggle `curfew_enabled`. Omitting a field leaves it alone; sending it as `null` vacates that office. Creates the row if it is missing |
+| POST | `/api/v1/government/auto-appoint` | Yes (admin) | Fill any **vacant** office with a citizen, leaving filled offices untouched. Never runs automatically, so it cannot undo a deliberate vacancy |
+
+Startup establishes the government row once, appointing the two lowest-id
+citizens if any exist. It keys off the row, not off the presidency, so an office
+you deliberately vacate stays vacant across restarts. On a brand-new install
+there are no citizens yet, so both offices start vacant and the map says so —
+`POST /api/v1/government/auto-appoint` is the one-call fix.
+
 ## 13. Run tests
 
 ```bash

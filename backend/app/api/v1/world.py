@@ -34,6 +34,11 @@ from app.services.world_service import (
 )
 from app.simulation.building_types import BUILDING_TYPES
 
+# Built once at import, not per request. The membership test below runs for
+# every value in `?type=`, and rebuilding the set inside that comprehension
+# rebuilt it once per value — mirrors `_VALID_DISTRICT_TYPES` in schemas/world.py.
+_VALID_BUILDING_TYPES = frozenset(BUILDING_TYPES)
+
 router = APIRouter(prefix="/api/v1/world", tags=["world"])
 
 
@@ -112,10 +117,19 @@ def get_world_simulation(db: Session = Depends(get_db)):
 def get_government(db: Session = Depends(get_db)):
     """Public — President / First Lady / capital / presidential district.
 
-    Returns `system_available: false` until the Government system is
-    installed; the map should hide government-only labels while that's the
-    case. Names come from the DB, never hardcoded, so a rename is reflected
-    here automatically."""
+    Returns `system_available: false` when no government has been established,
+    so the map can hide its government-only labels instead of erroring. Note
+    that `true` does not imply a sitting President — an established government
+    can have vacant offices, in which case the names are null.
+
+    Names come from the `citizens` rows the government points at, resolved on
+    every request and never hardcoded or cached, so a rename is reflected here
+    automatically. The map polls this endpoint, so an appointment shows up
+    without a page reload.
+
+    See also GET /api/v1/government, which returns the government in full
+    (office holder ids, term start, timestamps) rather than this flat,
+    render-oriented summary."""
     return world_service.get_government_summary(db)
 
 
@@ -190,7 +204,7 @@ def list_buildings(
     Useful on its own for lazy-loading one city's buildings, or for fetching
     just the landmarks (`?type=presidential_palace&type=parliament`)."""
     if type:
-        unknown = [t for t in type if t not in set(BUILDING_TYPES)]
+        unknown = [t for t in type if t not in _VALID_BUILDING_TYPES]
         if unknown:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

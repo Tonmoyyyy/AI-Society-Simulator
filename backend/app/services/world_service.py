@@ -29,12 +29,13 @@ from app.models.road import Road
 from app.repositories import (
     building_repo,
     citizen_repo,
+    government_repo,
     shop_repo,
     simulation_tick_repo,
     timeline_repo,
     world_repo,
 )
-from app.services import dashboard_service
+from app.services import dashboard_service, government_service
 from app.simulation.building_types import (
     BUILDING_TYPE_SPECS,
     BUILDING_TYPES,
@@ -52,7 +53,12 @@ from app.simulation.world_layout import (
     DISTRICT_TYPES,
 )
 
-# SDD §5: 1 tick = 1 simulated hour. Day 1 is ticks 0-23.
+# SDD §5: 1 tick = 1 simulated hour.
+#
+# TICKS ARE 1-BASED: simulation_tick_repo.next_tick_number returns
+# `(current_max or 0) + 1`, so the very first tick ever recorded is tick 1, not
+# tick 0. Day 1 is therefore ticks 1-24 and day 2 starts at tick 25 — see
+# `_day_for_tick`, which is the only place that conversion is allowed to live.
 TICKS_PER_DAY = 24
 
 # Default cap on how many citizen markers GET /api/v1/world returns. The
@@ -358,6 +364,28 @@ def _shop_names(db: Session, buildings: Iterable[Building]) -> dict[int, str]:
     }
 
 
+def _serialize_buildings(db: Session, buildings: list[Building]) -> list[dict]:
+    """Attach city position, owner name and shop name to a list of building rows.
+
+    Split out from `list_buildings` so `get_world_overview` can fetch the rows
+    ONCE and use them twice — for its own `buildings` key and for the citizen
+    markers' venue index — instead of scanning the table twice per map load.
+    """
+    cities = {city.id: city for city in world_repo.list_cities(db)}
+    owners = _owner_names(db, buildings)
+    shops = _shop_names(db, buildings)
+
+    return [
+        _serialize_building(
+            building,
+            cities.get(building.city_id),
+            owner_name=owners.get(building.owner_citizen_id),
+            shop_name=shops.get(building.shop_id),
+        )
+        for building in buildings
+    ]
+
+
 def list_buildings(
     db: Session,
     city_id: Optional[int] = None,
@@ -372,19 +400,7 @@ def list_buildings(
     buildings = building_repo.list_buildings(
         db, city_id=city_id, neighborhood_id=neighborhood_id, types=types
     )
-    cities = {city.id: city for city in world_repo.list_cities(db)}
-    owners = _owner_names(db, buildings)
-    shops = _shop_names(db, buildings)
-
-    return [
-        _serialize_building(
-            building,
-            cities.get(building.city_id),
-            owner_name=owners.get(building.owner_citizen_id),
-            shop_name=shops.get(building.shop_id),
-        )
-        for building in buildings
-    ]
+    return _serialize_buildings(db, buildings)
 
 
 def get_building_detail(db: Session, building_id: int) -> dict:
@@ -500,6 +516,8 @@ def _serialize_world_citizen(
     neighborhood: Optional[Neighborhood],
     home: Optional[Building],
     venue: Optional[Building],
+    president_id: Optional[int] = None,
+    first_lady_id: Optional[int] = None,
 ) -> dict:
     """
     Resolve one marker's position, then return only the fields the marker and
@@ -513,6 +531,10 @@ def _serialize_world_citizen(
     a family sharing a house, or twenty workers in one factory, don't stack into
     a single dot. It's seeded from the citizen id, so a citizen's spot inside
     their house never changes between requests.
+
+    `president_id` / `first_lady_id` are passed in rather than looked up here,
+    because this runs once per citizen and the government is one row — fetching
+    it inside this function would turn one query into N.
     """
     base = venue or home
     if base is not None:
@@ -546,10 +568,11 @@ def _serialize_world_citizen(
         "marker_x": base_x + jitter_x,
         "marker_z": base_z + jitter_z,
         "at_work": venue is not None and citizen.current_activity in WORK_ACTIVITIES,
-        # Wired up with the Government system — same single-point-of-change rule
-        # as get_government_summary(). Never hardcoded to a name.
-        "is_president": False,
-        "is_first_lady": False,
+        # Compared against ids from the government row, never against a name, so
+        # renaming a citizen cannot break the match. False when the office is
+        # vacant or no government exists.
+        "is_president": president_id is not None and citizen.id == president_id,
+        "is_first_lady": first_lady_id is not None and citizen.id == first_lady_id,
     }
 
 
@@ -557,13 +580,20 @@ def list_world_citizens(
     db: Session,
     city_id: Optional[int] = None,
     limit: Optional[int] = DEFAULT_CITIZEN_LIMIT,
+    buildings: Optional[list[Building]] = None,
 ) -> tuple[list[dict], bool]:
     """
     Every citizen marker to draw, plus a flag saying whether the list was cut
     off by `limit`.
 
     Fixed query count regardless of population: citizens, cities, districts,
-    buildings, homes. Nothing in here is per-citizen.
+    homes, buildings, government. Nothing in here is per-citizen.
+
+    `buildings` is an optional pre-fetched list of the SAME rows this would
+    otherwise query itself. `get_world_overview` passes what it already loaded
+    for its own `buildings` key, which removes a second full scan of the table
+    on the map's main request. Callers that don't have them (the standalone
+    /world/citizens route) leave it None and this fetches them.
     """
     if city_id is not None and world_repo.get_city(db, city_id) is None:
         raise CityNotFound(f"City {city_id} not found")
@@ -581,7 +611,14 @@ def list_world_citizens(
     cities = {city.id: city for city in world_repo.list_cities(db)}
     districts = {d.id: d for d in world_repo.list_neighborhoods(db)}
     homes = building_repo.map_homes_by_citizen(db)
-    venue_index = _venue_index(building_repo.list_buildings(db, city_id=city_id))
+    if buildings is None:
+        buildings = building_repo.list_buildings(db, city_id=city_id)
+    venue_index = _venue_index(buildings)
+
+    # One row, read once for the whole list — see _serialize_world_citizen.
+    gov = government_repo.get_government(db)
+    president_id = gov.president_citizen_id if gov else None
+    first_lady_id = gov.first_lady_citizen_id if gov else None
 
     payload = []
     for citizen in citizens:
@@ -593,6 +630,8 @@ def list_world_citizens(
                 districts.get(citizen.neighborhood_id),
                 home,
                 _pick_venue(citizen, venue_index),
+                president_id,
+                first_lady_id,
             )
         )
     return payload, truncated
@@ -602,25 +641,27 @@ def list_world_citizens(
 
 def get_government_summary(db: Session) -> dict:
     """
-    THE ONE PLACE to wire the Government/President/First Lady system into the
-    3D map.
+    THE ONE PLACE where the Government/President/First Lady system meets the
+    3D map. Wired up on 2026-08-21; before that it returned
+    `system_available: False` and the map hid its government UI.
 
-    Right now this codebase has no government models (no president / first
-    lady / parliament / marriage tables exist yet), so this returns
-    `system_available: False` plus the location of the presidential district,
-    which IS already known from the world data. The map can render the
-    Presidential District correctly today and simply hide the
-    president/first-lady labels until the system lands.
+    The split of responsibilities is deliberate:
 
-    WHEN THE GOVERNMENT SYSTEM IS FINISHED, edit only this function:
-        from app.repositories import government_repo
-        gov = government_repo.get_current_government(db)
-        ...populate president_name / first_lady_name / tax_rate / curfew...
-        payload["system_available"] = True
+      * `government_service.get_summary` owns the government's own facts —
+        president name, first lady name, tax rate, curfew.
+      * this function owns the *location* facts — which city is the capital and
+        which district is presidential — because those come from the world data
+        the map is already drawn from (`cities.is_capital`), not from the
+        government table. That is why `governments` has no `capital_city_id`
+        column: one source of truth, no chance of the two disagreeing.
 
-    Because names are read from the DB here and never cached or hardcoded,
-    renaming the President from "Tonmoy" to "Alex" changes the map label with
-    zero frontend changes — which is the requirement.
+    IMPORT DIRECTION: world_service -> government_service, never the reverse.
+    `government_service` reads the capital through `world_repo` instead of
+    importing this module, which is what keeps the pair free of a cycle.
+
+    Because names are read from `citizens` on every request and never cached or
+    hardcoded, renaming the President from "Tonmoy" to "Alex" changes the map
+    label with zero frontend changes — which is the requirement.
     """
     capital = world_repo.get_capital(db)
     presidential_district = None
@@ -629,20 +670,36 @@ def get_government_summary(db: Session) -> dict:
             db, capital.id, DISTRICT_PRESIDENTIAL
         )
 
+    # Government's own fields. Returns `system_available: False` if no
+    # government row exists, so a never-seeded database still renders the map
+    # with the government UI hidden rather than erroring.
+    summary = government_service.get_summary(db)
+
     return {
-        "president_name": None,
-        "first_lady_name": None,
+        **summary,
         "capital_city_id": capital.id if capital else None,
         "capital_city_name": capital.name if capital else None,
         "presidential_neighborhood_id": presidential_district.id if presidential_district else None,
         "presidential_neighborhood_name": presidential_district.name if presidential_district else None,
-        "tax_rate": None,
-        "curfew_enabled": None,
-        "system_available": False,
     }
 
 
 # -------------------------------------------------------------- world summary
+
+def _day_for_tick(tick_number: int) -> int:
+    """Simulated day number for a 1-based tick.
+
+    Ticks 1-24 are day 1, 25-48 are day 2, and so on. The `max(..., 1)` handles
+    tick 0, which means "no tick has ever run" — that reads as day 1 rather
+    than day 0, because a society that hasn't started is still on its first day.
+    Without it, Python's floor division would give `(-1 // 24) + 1 == 0`.
+
+    An earlier version used `(tick_number // 24) + 1`, which assumed ticks
+    started at 0. Since they start at 1, that made day 1 only 23 hours long and
+    shifted every later day boundary by an hour.
+    """
+    return ((max(tick_number, 1) - 1) // TICKS_PER_DAY) + 1
+
 
 def get_simulation_summary(db: Session) -> dict:
     """Reuses the existing dashboard + tick layers rather than re-querying —
@@ -665,7 +722,7 @@ def get_simulation_summary(db: Session) -> dict:
 
     return {
         "tick_number": tick_number,
-        "day": (tick_number // TICKS_PER_DAY) + 1,
+        "day": _day_for_tick(tick_number),
         "population": stats["population"],
         "city_count": world_repo.count_cities(db),
         "neighborhood_count": world_repo.count_neighborhoods(db),
@@ -702,24 +759,33 @@ def get_world_overview(
         cities = [city for city in cities if city["id"] == city_id]
     neighborhoods = list_neighborhoods(db, city_id=city_id)
 
+    # Fetched once and used twice: serialized into the `buildings` key below,
+    # and handed to list_world_citizens as its venue index source. Before this
+    # the same query ran twice on every map load.
+    building_rows = building_repo.list_buildings(db, city_id=city_id)
+
     citizens: list[dict] = []
     citizens_truncated = False
     if include_citizens:
         citizens, citizens_truncated = list_world_citizens(
-            db, city_id=city_id, limit=citizen_limit
+            db, city_id=city_id, limit=citizen_limit, buildings=building_rows
         )
 
     return {
         "cities": cities,
         "neighborhoods": neighborhoods,
-        "buildings": list_buildings(db, city_id=city_id),
+        "buildings": _serialize_buildings(db, building_rows),
         "roads": list_roads(db, city_id=city_id),
         "citizens": citizens,
         "government": get_government_summary(db),
         "simulation": get_simulation_summary(db),
         "unassigned_citizens": world_repo.count_unassigned_citizens(db),
         "citizens_truncated": citizens_truncated,
-        "world_generated": building_repo.count_buildings(db) > 0,
+        # Counts the ROWS ALREADY FETCHED rather than re-querying: when the
+        # payload is filtered to one city this now means "this city has
+        # buildings", which is exactly what the map's "generate the world" hint
+        # should key off. An unfiltered load is unchanged.
+        "world_generated": len(building_rows) > 0,
     }
 
 
