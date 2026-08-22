@@ -45,14 +45,19 @@ import random
 from typing import Optional
 
 from app.simulation.building_types import (
+    BUILDING_COLLEGE,
     BUILDING_FACTORY,
     BUILDING_GOVERNMENT_OFFICE,
+    BUILDING_HOSPITAL,
     BUILDING_HOUSE,
+    BUILDING_LIBRARY,
     BUILDING_MONUMENT,
     BUILDING_OFFICE,
     BUILDING_PARK_FEATURE,
     BUILDING_PARLIAMENT,
+    BUILDING_POLICE_STATION,
     BUILDING_PRESIDENTIAL_PALACE,
+    BUILDING_SCHOOL,
     BUILDING_SHOP,
     ROAD_DISTRICT,
     ROAD_GOVERNMENT,
@@ -94,6 +99,42 @@ HOUSING_CAPACITY_STEP = 8
 # cell size we place fewer houses rather than overlapping them; the service
 # reports those citizens as housed-in-district-but-no-building.
 MIN_FOOTPRINT = 4.0
+
+# Clear space kept between two buildings when testing whether a new one fits.
+# Applied as padding on BOTH rectangles, so the real gap is twice this.
+BUILDING_CLEARANCE = 1.5
+
+# Civic buildings are allowed closer to the district edge than houses are
+# (DISTRICT_MARGIN = 9). The outer band is usually the only leftover space in a
+# built-up district, and a school tucked against the boundary is a much better
+# outcome than no school. Still non-zero so the ground plate reads as an edge.
+CIVIC_MARGIN = 4.0
+
+# Granularity of the civic placement search, in world units. Small enough to
+# find the gap between two office blocks, coarse enough that a district is a few
+# hundred candidate positions rather than a few hundred thousand.
+CIVIC_SCAN_STEP = 4.0
+
+# Which civic buildings each district type gets, in the order they are placed.
+#
+# ONE OF EACH PER DISTRICT, and since DEFAULT_WORLD gives every city at most one
+# district of each type, that reads as "one school per residential district, one
+# hospital in the government district", which is about right for a society of a
+# few hundred people.
+#
+# The Presidential District is deliberately absent: its layout is hand-placed and
+# symmetrical (see plan_presidential_district), and dropping a police station
+# into it would spoil the one composed view in the world. Park districts are
+# absent too — they already have their monument, and the point of a park is the
+# absence of buildings.
+CIVIC_PLAN = {
+    DISTRICT_RESIDENTIAL: (BUILDING_SCHOOL, BUILDING_LIBRARY, BUILDING_POLICE_STATION),
+    DISTRICT_WORKER: (BUILDING_SCHOOL, BUILDING_POLICE_STATION),
+    DISTRICT_CENTRAL: (BUILDING_COLLEGE, BUILDING_HOSPITAL, BUILDING_LIBRARY),
+    DISTRICT_GOVERNMENT: (BUILDING_HOSPITAL, BUILDING_POLICE_STATION),
+    DISTRICT_COMMERCIAL: (BUILDING_POLICE_STATION,),
+    DISTRICT_INDUSTRIAL: (BUILDING_HOSPITAL,),
+}
 
 
 # ------------------------------------------------------------------ RNG
@@ -251,6 +292,104 @@ def grid_slots(
 
 # ------------------------------------------------------- building blueprints
 
+# ---- overlap geometry ----
+#
+# Used twice: to slot civic buildings into the gaps a district already has
+# (below), and to reject an admin's hand-placed building that would land on top
+# of something (services/building_admin_service.py). One implementation, so
+# "does it fit?" can never mean two different things.
+#
+# ROTATION IS IGNORED ON PURPOSE. Generated rotations are at most ±0.09 rad (~5°)
+# and BUILDING_CLEARANCE is wider than the error that introduces, so an
+# axis-aligned test with padding is both simpler and slightly conservative —
+# it can reject a placement that would technically have squeezed in, which is the
+# safe direction to be wrong in.
+
+def building_dims(building) -> tuple[float, float, float, float]:
+    """(offset_x, offset_z, width, depth) from either a blueprint dict or a
+    Building row.
+
+    A tiny adapter so the overlap helpers work on generator output (plain dicts,
+    no database) and on ORM rows alike — which is what lets the pure-function
+    rule at the top of this file survive being reused by a service.
+    """
+    if isinstance(building, dict):
+        return (
+            float(building["offset_x"]),
+            float(building["offset_z"]),
+            float(building["width"]),
+            float(building["depth"]),
+        )
+    return (
+        float(building.offset_x),
+        float(building.offset_z),
+        float(building.width),
+        float(building.depth),
+    )
+
+
+def rect_for(building, pad: float = 0.0) -> tuple[float, float, float, float]:
+    """Axis-aligned (min_x, min_z, max_x, max_z) footprint, grown by `pad`."""
+    ox, oz, w, d = building_dims(building)
+    half_w = w / 2 + pad
+    half_d = d / 2 + pad
+    return (ox - half_w, oz - half_d, ox + half_w, oz + half_d)
+
+
+def rects_overlap(a: tuple, b: tuple) -> bool:
+    """True if two (min_x, min_z, max_x, max_z) boxes intersect.
+
+    Touching exactly at an edge counts as NOT overlapping, which is why the
+    comparisons are strict.
+    """
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def first_collision(candidate, existing, clearance: float = BUILDING_CLEARANCE):
+    """The first thing in `existing` that `candidate` would land on, or None.
+
+    Returns the offender rather than a bool so the admin placement endpoint can
+    say *what* is in the way ("overlaps building 412, Riverside Market") instead
+    of a bare "doesn't fit", which is useless when you are clicking on a map.
+
+    Both arguments accept blueprint dicts or Building rows. `clearance` is applied
+    to both rectangles, so the enforced gap between two buildings is 2x it.
+    """
+    rect = rect_for(candidate, clearance)
+    for other in existing:
+        if rects_overlap(rect, rect_for(other, clearance)):
+            return other
+    return None
+
+
+def collides(candidate, existing, clearance: float = BUILDING_CLEARANCE) -> bool:
+    """True if `candidate` would land on (or too near) anything in `existing`.
+
+    The yes/no form of `first_collision`, kept because the generator's inner loops
+    read better as a predicate. One implementation underneath, so the placement
+    endpoint and the generator can never disagree about what "fits" means.
+    """
+    return first_collision(candidate, existing, clearance) is not None
+
+
+def within_district(building, width: float, depth: float, margin: float = 0.0) -> bool:
+    """True if a building's whole footprint sits inside a district's bounds.
+
+    Offsets are relative to the DISTRICT centre here, not the city centre — the
+    caller subtracts the district offset first. `margin` keeps the building that
+    far inside the edge so the ground plate still reads as a boundary.
+    """
+    min_x, min_z, max_x, max_z = rect_for(building)
+    half_w = width / 2 - margin
+    half_d = depth / 2 - margin
+    return (
+        min_x >= -half_w
+        and max_x <= half_w
+        and min_z >= -half_d
+        and max_z <= half_d
+    )
+
+
 def _blueprint(
     type_: str,
     district_offset_x: float,
@@ -285,6 +424,35 @@ def _blueprint(
         "rotation": round(rng.uniform(-0.09, 0.09), 4) if rotate else 0.0,
         "is_landmark": bool(spec["is_landmark"]),
     }
+
+
+def house_blueprint(
+    city_id: int,
+    district_id: int,
+    slot_index: int,
+    district_offset_x: float,
+    district_offset_z: float,
+    slot_x: float,
+    slot_z: float,
+) -> dict:
+    """
+    The house that belongs at one grid slot — the SAME house a full regeneration
+    would produce there.
+
+    Exists so `world_generation_service.assign_citizen_to_world` can append a
+    single house without re-deriving the size wobble by hand. It used to inline
+    that arithmetic, which meant a house created incrementally could drift from
+    the one a regeneration would put in the same slot if `_blueprint` ever
+    changed. Now there is one implementation and the two paths cannot disagree.
+    """
+    return _blueprint(
+        BUILDING_HOUSE,
+        district_offset_x,
+        district_offset_z,
+        slot_x,
+        slot_z,
+        stable_rng("house", city_id, district_id, slot_index),
+    )
 
 
 def plan_presidential_district(district: dict, city_id: int) -> list[dict]:
@@ -348,11 +516,172 @@ def plan_presidential_district(district: dict, city_id: int) -> list[dict]:
     return buildings
 
 
+def _scan_axis(reach: float) -> list[float]:
+    """Symmetric scan positions from -reach to +reach, spaced at least
+    CIVIC_SCAN_STEP apart and always including both endpoints.
+
+    Endpoints matter: the edges of a district are where the leftover space
+    actually is, so a scan that stopped short of ±reach would miss the best
+    candidates.
+    """
+    if reach <= 0:
+        return [0.0]
+    count = max(1, int((reach * 2) // CIVIC_SCAN_STEP))
+    step = (reach * 2) / count
+    return [round(-reach + i * step, 3) for i in range(count + 1)]
+
+
+def _civic_candidates(
+    width: float,
+    depth: float,
+    spec: dict,
+    margin: float = CIVIC_MARGIN,
+    corridor_half: float = DISTRICT_CORRIDOR_HALF,
+) -> list[tuple[float, float]]:
+    """
+    Every position a civic building of `spec` could legally stand in, district-
+    relative, ORDERED EDGES FIRST.
+
+    A fine scan rather than a grid, for two reasons:
+
+      * `grid_slots` shrinks its cell until the requested count fits, which is
+        right for packing houses and wrong here — a school squeezed to 60% size to
+        make it fit is worse than no school. Civic buildings keep their size or
+        they don't get built.
+      * A coarse grid at the building's own footprint is too blunt to find the
+        gaps that a district actually has. An early version of this stepped by
+        `footprint`, and in a 70-deep district that produced exactly ONE row of
+        candidates — sitting on the road corridor, so nothing was ever placed.
+        Scanning finely lets the search discover the space between two office
+        blocks instead of only the space a rigid grid happens to line up with.
+
+    Edges-first ordering keeps civic buildings tucked against the district
+    boundary, which leaves the middle of the district legible and puts them behind
+    the housing rows rather than in the middle of a street. Ties break on |x| so
+    the order is total and therefore reproducible.
+
+    Positions inside the road corridor are dropped: `grid_slots` keeps the strip
+    clear for houses by discarding whole rows, but a civic building is wider than
+    one cell, so its real footprint has to be tested against the strip.
+    """
+    reach_x = width / 2 - margin - spec["width"] / 2
+    reach_z = depth / 2 - margin - spec["depth"] / 2
+    if reach_x < 0 or reach_z < 0:
+        # The building is simply too big for this district. Not an error — the
+        # caller treats "no candidates" the same as "nothing fit".
+        return []
+
+    clear_of_road = corridor_half + spec["depth"] / 2
+
+    out = [
+        (x, z)
+        for z in _scan_axis(reach_z)
+        if abs(z) >= clear_of_road
+        for x in _scan_axis(reach_x)
+    ]
+    out.sort(key=lambda pos: (-abs(pos[1]), -abs(pos[0]), pos[1], pos[0]))
+    return out
+
+
+def plan_civic_buildings(
+    district: dict,
+    city_id: int,
+    existing: list[dict],
+) -> list[dict]:
+    """
+    Fit this district's civic buildings (school, hospital, ...) into the gaps
+    around what has already been planned.
+
+    NOTHING ALREADY PLANNED MOVES. That is the whole design constraint and the
+    reason this is a separate pass rather than extra entries in the main grid:
+    adding a school by asking `grid_slots` for one more slot would change the
+    grid's column count and relocate every house in the district, which the spec
+    forbids ("A citizen's house should not randomly move"). Instead this searches
+    the leftover space and places what fits.
+
+    A district with no room simply gets no civic building. Silently placing one
+    on top of a house would be worse than the omission.
+
+    `existing` is the already-planned blueprint list for THIS district, with
+    city-relative offsets — the same frame the return value uses.
+    """
+    wanted = CIVIC_PLAN.get(district["type"], ())
+    if not wanted:
+        return []
+
+    dx = district["offset_x"]
+    dz = district["offset_z"]
+    width = district["width"]
+    depth = district["depth"]
+
+    # `existing` is only read, never mutated; `placed` grows as we go so two civic
+    # buildings can't be put in the same gap.
+    placed: list[dict] = []
+
+    for type_ in wanted:
+        spec = spec_for(type_)
+
+        # Size is decided ONCE, before the search, and the search only moves the
+        # result. Sizing inside the loop would work too — the whole thing is
+        # deterministic either way — but it would make a school's dimensions
+        # depend on how many candidate slots happened to be rejected first, which
+        # is a genuinely surprising coupling to leave in the code.
+        template = _blueprint(
+            type_, 0.0, 0.0, 0.0, 0.0,
+            stable_rng("civic", city_id, district["id"], type_),
+            name=f"{district['name']} {spec['label']}",
+            # Civic buildings stay square to the world. They read as deliberate
+            # public architecture that way — the same reason the Parliament is
+            # not rotated.
+            rotate=False,
+        )
+
+        # The road-corridor test lives inside `_civic_candidates`, which filters on
+        # the SPEC depth. The template's depth carries a small deterministic size
+        # wobble, so the two differ by a unit or so — the spec is deliberately the
+        # authority, because the candidate list has to be a property of the type and
+        # the district, not of one particular building's dice roll.
+        for slot_x, slot_z in _civic_candidates(width, depth, spec):
+            candidate = dict(
+                template,
+                offset_x=round(dx + slot_x, 3),
+                offset_z=round(dz + slot_z, 3),
+            )
+
+            # Bounds are checked district-relative (the slot IS the offset from the
+            # district centre), which is the frame `within_district` expects.
+            if not within_district(
+                {
+                    "offset_x": slot_x,
+                    "offset_z": slot_z,
+                    "width": template["width"],
+                    "depth": template["depth"],
+                },
+                width,
+                depth,
+                margin=2.0,
+            ):
+                continue
+
+            if collides(candidate, existing) or collides(candidate, placed):
+                continue
+
+            placed.append(candidate)
+            break
+
+        # No error and no early return when a type doesn't fit: running out of room
+        # for one must not stop the next from being tried. A district can fit a
+        # police station (22 units) after failing to fit a college (34).
+
+    return placed
+
+
 def plan_district_buildings(
     district: dict,
     city_id: int,
     house_count: int = 0,
     shop_names: Optional[list[str]] = None,
+    reserved: Optional[list] = None,
 ) -> list[dict]:
     """
     Every building for one district, positioned relative to the city centre.
@@ -360,6 +689,58 @@ def plan_district_buildings(
     `house_count` is how many citizens have been assigned to this district —
     housing districts generate exactly that many houses (plus a few spares so
     the street doesn't end abruptly), other district types ignore it.
+
+    `reserved` is ground that is already taken and must not be planned over —
+    in practice the hand-placed (`is_manual`) buildings that survived the
+    regeneration's delete. Accepts Building rows or blueprint dicts, in the same
+    city-relative frame as the return value. Anything the generator would have put
+    on top of one is DROPPED rather than nudged: nudging would move a house, and
+    "a citizen's house should not randomly move" is the rule this whole module
+    exists to keep. The cost is that a district can end up with fewer houses than
+    residents, which `generate_world` already reports as `housed_citizens` being
+    lower than `assigned_citizens`. The admin's deliberate placement outranks a
+    generated house — that is the whole point of having placed it.
+
+    TWO PASSES, and the order matters. `_plan_base_buildings` lays out the
+    district's reason for existing (houses, shops, factories, offices) on a packed
+    grid; `plan_civic_buildings` then fits schools, hospitals and the rest into
+    whatever space is left over. Doing it that way — rather than planning
+    everything in one grid — is what guarantees that adding a civic building type
+    to CIVIC_PLAN never moves an existing house. The second pass can only occupy
+    gaps.
+
+    A signature-compatible wrapper on purpose: `world_generation_service` and the
+    existing tests call this exact name, and `reserved` is an optional keyword, so
+    civic buildings and manual-placement awareness both arrived without a single
+    caller changing.
+    """
+    base = _plan_base_buildings(district, city_id, house_count, shop_names)
+
+    keep = list(reserved or [])
+    if keep:
+        base = [b for b in base if not collides(b, keep)]
+
+    # The Presidential District is returned untouched — `CIVIC_PLAN` has no entry
+    # for it, so this is belt-and-braces, but it documents the intent: that
+    # district's composition is hand-authored and nothing may be appended to it.
+    if district["type"] == DISTRICT_PRESIDENTIAL:
+        return base
+
+    # The civic pass has to see BOTH what was just planned and what survived,
+    # otherwise a school would be dropped into the gap an admin's own building is
+    # standing in.
+    return base + plan_civic_buildings(district, city_id, base + keep)
+
+
+def _plan_base_buildings(
+    district: dict,
+    city_id: int,
+    house_count: int = 0,
+    shop_names: Optional[list[str]] = None,
+) -> list[dict]:
+    """
+    The district's primary buildings — the grid-packed pass. See
+    `plan_district_buildings`, which is the entry point callers should use.
     """
     d_type = district["type"]
 

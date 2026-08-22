@@ -1,9 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.concurrency import run_in_threadpool  # <-- table creation ব্লক না করার জন্য
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1 import auth as auth_routes
 from app.api.v1 import citizens as citizen_routes
@@ -12,12 +13,12 @@ from app.api.v1 import government as government_routes
 from app.api.v1 import shop as shop_routes
 from app.api.v1 import simulation as simulation_routes
 from app.api.v1 import social as social_routes
-from app.api.v1 import wallet as wallet_routes  # <-- আগে বাদ পড়ে গিয়েছিল
+from app.api.v1 import wallet as wallet_routes
 from app.api.v1 import world as world_routes
 from app.core.config import settings
 from app.core.error_handlers import register_error_handlers
-from app.db.base import Base  # ডাটাবেজ মডেলের Base ইমপোর্ট
-from app.db.session import engine, SessionLocal  # SQLAlchemy engine ইমপোর্ট
+from app.db.base import Base
+from app.db.session import engine, SessionLocal
 from app.simulation.seed_shops import ensure_seed_shops
 from app.services.government_service import ensure_government
 from app.services.world_generation_service import ensure_world_generated
@@ -27,21 +28,11 @@ from app.websocket.connection_manager import manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ১. টেবিল ক্রিয়েশনকে থ্রেডপুলে রান করা হচ্ছে যেন Event Loop ব্লক না হয়
-    #    (safety-net — আসল schema source of truth এখনও Alembic migrations)
-    # try/except: this talks to the real MySQL engine directly, which the
-    # test suite's SQLite override does NOT patch (only get_db is patched).
-    # Without this guard, pytest — and any real startup before MySQL is
-    # up — crashes the whole app here instead of just skipping the
-    # convenience step.
     try:
         await run_in_threadpool(Base.metadata.create_all, bind=engine)
     except Exception as exc:
-        print(f"[startup] Skipping auto-create tables (DB not reachable yet?): {exc}")
+        print(f"[startup] Skipping auto-create tables: {exc}")
 
-    # Seed starter shops/products so the marketplace isn't empty out of the
-    # box — idempotent (no-op if shops already exist), same resilience
-    # pattern as create_all above.
     def _seed():
         db = SessionLocal()
         try:
@@ -52,12 +43,8 @@ async def lifespan(app: FastAPI):
     try:
         await run_in_threadpool(_seed)
     except Exception as exc:
-        print(f"[startup] Skipping shop seed (DB not reachable yet?): {exc}")
+        print(f"[startup] Skipping shop seed: {exc}")
 
-    # Seed the default world (cities + districts) so the Society Map isn't
-    # empty out of the box. Idempotent — a no-op once any city exists, which
-    # is what makes admin city renames permanent across restarts. Same
-    # resilience pattern as the two steps above.
     def _seed_world():
         db = SessionLocal()
         try:
@@ -68,13 +55,8 @@ async def lifespan(app: FastAPI):
     try:
         await run_in_threadpool(_seed_world)
     except Exception as exc:
-        print(f"[startup] Skipping world seed (DB not reachable yet?): {exc}")
+        print(f"[startup] Skipping world seed: {exc}")
 
-    # Lay out the world's geometry — buildings, citizen homes and roads —
-    # so the 3D map has something to draw on first boot. Also idempotent:
-    # a no-op the moment any building row exists, so it does NOT re-roll the
-    # world on every restart and a citizen's house never moves. Runs after the
-    # world seed above because it needs the cities/districts to exist.
     def _generate_world():
         db = SessionLocal()
         try:
@@ -85,14 +67,8 @@ async def lifespan(app: FastAPI):
     try:
         await run_in_threadpool(_generate_world)
     except Exception as exc:
-        print(f"[startup] Skipping world generation (DB not reachable yet?): {exc}")
+        print(f"[startup] Skipping world generation: {exc}")
 
-    # Establish the government row (President / First Lady / tax / curfew) so
-    # the map's Presidential Palace has real names to label instead of an
-    # "unavailable" notice. Idempotent in the strongest sense: it only ever acts
-    # when NO government row exists, so a deliberately vacated office stays
-    # vacant across restarts. Runs last because it reads citizens and the
-    # capital city, both of which the steps above may have just created.
     def _seed_government():
         db = SessionLocal()
         try:
@@ -103,26 +79,34 @@ async def lifespan(app: FastAPI):
     try:
         await run_in_threadpool(_seed_government)
     except Exception as exc:
-        print(f"[startup] Skipping government seed (DB not reachable yet?): {exc}")
+        print(f"[startup] Skipping government seed: {exc}")
 
-    # ২. Websocket event loop bind
     manager.bind_loop(asyncio.get_running_loop())
     yield
 
 
 app = FastAPI(title=settings.APP_NAME, version="0.1.0", lifespan=lifespan)
 
-# v0.1 frontend is static HTML/JS served from its own dev port (see
-# frontend/README.md) — no cookies/credentials involved (JWT goes in a
-# header, not a cookie), so a permissive local-dev CORS policy is fine.
-# Tighten this to a specific origin before any real deployment.
+# CORS Middleware (Must be applied first)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global Exception Handler (Fixes CORS blocking on 500 Internal Server Errors)
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"\n[BACKEND ERROR DETECTED]: {exc}\n")
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": 500, "message": str(exc)}},
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
 
 register_error_handlers(app)
 
@@ -130,7 +114,7 @@ app.include_router(auth_routes.router)
 app.include_router(citizen_routes.router)
 app.include_router(simulation_routes.router)
 app.include_router(social_routes.router)
-app.include_router(wallet_routes.router)  # <-- আগে বাদ পড়ে গিয়েছিল
+app.include_router(wallet_routes.router)
 app.include_router(dashboard_routes.router)
 app.include_router(shop_routes.router)
 app.include_router(world_routes.router)
@@ -139,9 +123,6 @@ app.include_router(government_routes.router)
 
 @app.websocket("/ws/feed")
 async def feed_websocket(websocket: WebSocket):
-    """Realtime feed: pushes {"type": "new_post" | "new_comment", ...}
-    events as they happen (from ticks or the API). Clients don't need to
-    send anything — this just keeps the connection open."""
     await manager.connect(websocket)
     try:
         while True:
@@ -152,5 +133,4 @@ async def feed_websocket(websocket: WebSocket):
 
 @app.get("/health", tags=["health"])
 def health_check():
-    """Basic liveness check — also useful to confirm the app boots at all."""
     return {"status": "ok", "app": settings.APP_NAME, "env": settings.APP_ENV}

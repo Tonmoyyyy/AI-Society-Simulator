@@ -8,6 +8,14 @@ batch commit, so detectors see final post-tick state.
 Adding a detector for a future phase (e.g. "first business created" in a
 later economy expansion) means adding one function here and registering it
 in run_all_detectors — nothing else needs to change.
+
+EVERY AGGREGATE HERE COUNTS THE LIVING ONLY. Death is a soft flag, so the rows
+of deceased citizens stay in the table; without the explicit `is_alive` filters
+below, "population reached 50" would keep counting the dead and average happiness
+would be dragged by people who are no longer around to be unhappy. Note that a
+population milestone already recorded is NOT withdrawn if deaths take the
+population back under the threshold — `exists_with_title` makes these
+once-and-for-all historical records, which is the intent.
 """
 
 from sqlalchemy import func
@@ -23,7 +31,12 @@ _HAPPINESS_RECOVERED = 50.0
 
 
 def _check_population_milestone(db: Session, tick_number: int) -> list:
-    count = db.query(func.count(Citizen.id)).scalar() or 0
+    count = (
+        db.query(func.count(Citizen.id))
+        .filter(Citizen.is_alive.is_(True))
+        .scalar()
+        or 0
+    )
     created = []
     for threshold in _POPULATION_THRESHOLDS:
         if count < threshold:
@@ -48,7 +61,7 @@ def _check_richest_citizen(db: Session, tick_number: int) -> list:
     row = (
         db.query(Citizen.id, Citizen.name, Wallet.balance)
         .join(Wallet, Wallet.citizen_id == Citizen.id)
-        .filter(Wallet.balance > 0)
+        .filter(Wallet.balance > 0, Citizen.is_alive.is_(True))
         .order_by(Wallet.balance.desc())
         .first()
     )
@@ -74,7 +87,11 @@ def _check_richest_citizen(db: Session, tick_number: int) -> list:
 
 
 def _check_happiness(db: Session, tick_number: int) -> list:
-    avg_happiness = db.query(func.avg(Citizen.happiness)).scalar()
+    avg_happiness = (
+        db.query(func.avg(Citizen.happiness))
+        .filter(Citizen.is_alive.is_(True))
+        .scalar()
+    )
     if avg_happiness is None:
         return []
     avg_happiness = float(avg_happiness)

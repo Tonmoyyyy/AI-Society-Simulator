@@ -1,11 +1,20 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.simulation.building_types import BUILDING_TYPES
 from app.simulation.world_layout import DISTRICT_TYPES
 
 _VALID_DISTRICT_TYPES = set(DISTRICT_TYPES)
+_VALID_BUILDING_TYPES = set(BUILDING_TYPES)
+
+# Sanity bounds on hand-entered geometry. Generous on purpose — the point is to
+# catch a typo or a unit mix-up (a 5000-wide school), not to second-guess an
+# admin's taste. The world is roughly 2000 units across, so anything past a few
+# hundred is certainly a mistake.
+MIN_BUILDING_SIZE = 1.0
+MAX_BUILDING_SIZE = 300.0
 
 
 # ---------------------------------------------------------------- outputs
@@ -91,6 +100,10 @@ class BuildingOut(BaseModel):
     height: float
     rotation: float
     is_landmark: bool
+    is_manual: bool = Field(
+        default=False,
+        description="True when an admin placed this building by hand. Such buildings survive world regeneration; the map's build mode uses this to decide what may be moved or demolished.",
+    )
 
     owner_citizen_id: Optional[int] = None
     owner_name: Optional[str] = None
@@ -329,3 +342,186 @@ class NeighborhoodUpdate(BaseModel):
         if v is not None and v not in _VALID_DISTRICT_TYPES:
             raise ValueError(f"type must be one of {sorted(_VALID_DISTRICT_TYPES)}")
         return v
+
+
+# ------------------------------------------------ admin building placement
+#
+# TWO WAYS TO SAY WHERE, AND EXACTLY ONE MUST BE USED
+# ---------------------------------------------------
+# `buildings` stores offsets from the city centre, but the map's build mode gets
+# a click as an ABSOLUTE point on the ground plane from the Three.js raycaster.
+# Making the frontend convert would mean it had to hold a copy of every city's
+# world_x/world_z and redo the arithmetic the backend already does in reverse —
+# the sort of duplicated maths that drifts. So both spellings are accepted and
+# the service converts; `_require_one_position` below makes sure a request never
+# supplies both and never leaves the position ambiguous.
+
+
+class _BuildingGeometryMixin(BaseModel):
+    """Shared position/size fields and their cross-field checks.
+
+    A mixin rather than inheritance from BuildingCreate, because create and
+    update disagree about what is required — everything is optional on a PATCH,
+    including the position.
+    """
+
+    offset_x: Optional[float] = Field(
+        default=None, description="X offset from the parent city's centre. Use with offset_z."
+    )
+    offset_z: Optional[float] = Field(
+        default=None, description="Z offset from the parent city's centre. Use with offset_x."
+    )
+    world_x: Optional[float] = Field(
+        default=None,
+        description="Absolute X on the ground plane — what a map click gives you. The service converts it to an offset. Use with world_z.",
+    )
+    world_z: Optional[float] = Field(
+        default=None, description="Absolute Z on the ground plane. Use with world_x."
+    )
+
+    width: Optional[float] = Field(
+        default=None, ge=MIN_BUILDING_SIZE, le=MAX_BUILDING_SIZE
+    )
+    depth: Optional[float] = Field(
+        default=None, ge=MIN_BUILDING_SIZE, le=MAX_BUILDING_SIZE
+    )
+    height: Optional[float] = Field(
+        default=None, ge=MIN_BUILDING_SIZE, le=MAX_BUILDING_SIZE
+    )
+    # Radians, one full turn either way. Y-axis rotation, matching
+    # models/building.py — the ground is the XZ plane.
+    rotation: Optional[float] = Field(default=None, ge=-6.29, le=6.29)
+
+    @model_validator(mode="after")
+    def _positions_are_not_mixed(self):
+        """Reject a half-specified or double-specified position.
+
+        A request carrying only `offset_x` is almost always a client bug, and
+        silently keeping the old Z would put the building somewhere nobody asked
+        for. Likewise `offset_*` together with `world_*`: the two would have to
+        agree, and if they didn't there would be no defensible winner.
+        """
+        has_offset = self.offset_x is not None or self.offset_z is not None
+        has_world = self.world_x is not None or self.world_z is not None
+
+        if has_offset and has_world:
+            raise ValueError(
+                "Give either offset_x/offset_z or world_x/world_z, not both."
+            )
+        if has_offset and (self.offset_x is None or self.offset_z is None):
+            raise ValueError("offset_x and offset_z must be given together.")
+        if has_world and (self.world_x is None or self.world_z is None):
+            raise ValueError("world_x and world_z must be given together.")
+        return self
+
+
+class BuildingCreate(_BuildingGeometryMixin):
+    """
+    Admin — place one building by hand (map build mode).
+
+    Size, height and `is_landmark` are optional: omitted, they come from the
+    type's entry in simulation/building_types.py, which is what lets the frontend
+    place a school by sending a type and a click position and nothing else. That
+    is also why the defaults are NOT repeated here — one source of truth for what
+    a school is, and it is the same one the generator uses.
+
+    `owner_citizen_id` and `shop_id` are deliberately absent. Home ownership is
+    assigned by `world_generation_service`, and a shop's building is chosen at
+    generation time; letting a placement request claim either would allow two
+    buildings to be one citizen's house.
+    """
+
+    type: str = Field(description="One of the types from GET /api/v1/world/building-types.")
+
+    city_id: Optional[int] = Field(
+        default=None,
+        description="Parent city. Optional if neighborhood_id is given — the service derives it from the district.",
+    )
+    neighborhood_id: Optional[int] = Field(
+        default=None,
+        description="District to place it in. Null puts it on city land between districts, which skips the district-bounds check.",
+    )
+    name: Optional[str] = Field(default=None, max_length=120)
+    is_landmark: Optional[bool] = Field(
+        default=None,
+        description="Draw with special geometry and a name label. Defaults to the type's own setting.",
+    )
+
+    @field_validator("type")
+    @classmethod
+    def _validate_type(cls, v):
+        if v not in _VALID_BUILDING_TYPES:
+            raise ValueError(f"type must be one of {sorted(_VALID_BUILDING_TYPES)}")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def _blank_name_is_no_name(cls, v):
+        """An empty string from a form field means "no name", not a building
+        called "". Houses legitimately have NULL names — the map labels those with
+        their owner's name instead."""
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+    @model_validator(mode="after")
+    def _needs_a_place_and_a_position(self):
+        if self.city_id is None and self.neighborhood_id is None:
+            raise ValueError("Give city_id, neighborhood_id, or both.")
+        if self.offset_x is None and self.world_x is None:
+            raise ValueError(
+                "A position is required: give offset_x/offset_z or world_x/world_z."
+            )
+        return self
+
+
+class BuildingUpdate(_BuildingGeometryMixin):
+    """
+    Admin — move, resize, rename, retype or re-district one building.
+
+    EVERY FIELD IS OPTIONAL AND OMISSION IS MEANINGFUL. The service reads this
+    with `model_dump(exclude_unset=True)`, so a key that isn't in the request body
+    is left untouched, while `"name": null` genuinely clears the name and
+    `"neighborhood_id": null` moves the building out onto city land. Pydantic
+    cannot express that distinction through the type alone — it comes from
+    `exclude_unset`, which is why the service must not drop it.
+
+    `city_id` is NOT editable. Offsets are relative to the city centre, so
+    changing the parent would teleport the building by the distance between two
+    cities while its stored numbers stayed the same. Demolish and re-place instead.
+    """
+
+    type: Optional[str] = Field(
+        default=None,
+        description="Retype the building. Refused while it is somebody's house or a shop's premises — see the API docs.",
+    )
+    neighborhood_id: Optional[int] = Field(
+        default=None, description="Move to a different district; null means city land."
+    )
+    name: Optional[str] = Field(default=None, max_length=120)
+    is_landmark: Optional[bool] = None
+
+    @field_validator("type")
+    @classmethod
+    def _validate_type(cls, v):
+        if v is not None and v not in _VALID_BUILDING_TYPES:
+            raise ValueError(f"type must be one of {sorted(_VALID_BUILDING_TYPES)}")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def _blank_name_is_no_name(cls, v):
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+
+class BuildingDeleteResultOut(BaseModel):
+    """Demolition result. Returns the freed citizen id rather than nothing, so the
+    frontend knows whose marker just lost its house without re-fetching."""
+
+    deleted_building_id: int
+    former_owner_citizen_id: Optional[int] = None
+    detail: str

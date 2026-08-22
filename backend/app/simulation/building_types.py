@@ -31,10 +31,22 @@ BUILDING_FACTORY = "factory"
 BUILDING_MONUMENT = "monument"
 BUILDING_PARK_FEATURE = "park_feature"
 
-# Defined now, NOT generated yet — §21 "future-ready". The renderer already
-# knows how to draw them, so adding them later is purely a generator change.
+# ---- civic buildings ----
+#
+# School and hospital were declared here from Phase 2 onward but deliberately
+# never generated ("future-ready", §21). They are generated now, alongside three
+# new siblings, by `world_generator.plan_civic_buildings` — see the CIVIC_PLAN
+# table there for which district type gets which.
+#
+# Every one of these already has staff waiting for it in simulation/jobs.py:
+# `teacher` had no school, `doctor` and `nurse` had no hospital. Adding them to
+# VENUE_TYPES_BY_ACTIVITY below is what puts those citizens' markers at a
+# plausible workplace instead of at a random shop.
 BUILDING_SCHOOL = "school"
+BUILDING_COLLEGE = "college"
 BUILDING_HOSPITAL = "hospital"
+BUILDING_POLICE_STATION = "police_station"
+BUILDING_LIBRARY = "library"
 
 BUILDING_TYPES = [
     BUILDING_PRESIDENTIAL_PALACE,
@@ -47,7 +59,10 @@ BUILDING_TYPES = [
     BUILDING_MONUMENT,
     BUILDING_PARK_FEATURE,
     BUILDING_SCHOOL,
+    BUILDING_COLLEGE,
     BUILDING_HOSPITAL,
+    BUILDING_POLICE_STATION,
+    BUILDING_LIBRARY,
 ]
 
 # Types the renderer should draw with a unique hand-built mesh instead of a
@@ -164,6 +179,16 @@ BUILDING_TYPE_SPECS = {
         "footprint": 28.0,
         "is_landmark": False,
     },
+    BUILDING_COLLEGE: {
+        "label": "College",
+        "icon": "\U0001F393",          # graduation cap
+        "color": "#c3d6e0",
+        "width": 26.0,
+        "depth": 19.0,
+        "height": 14.0,
+        "footprint": 34.0,
+        "is_landmark": False,
+    },
     BUILDING_HOSPITAL: {
         "label": "Hospital",
         "icon": "\U0001F3E5",          # hospital
@@ -172,6 +197,26 @@ BUILDING_TYPE_SPECS = {
         "depth": 16.0,
         "height": 15.0,
         "footprint": 28.0,
+        "is_landmark": False,
+    },
+    BUILDING_POLICE_STATION: {
+        "label": "Police Station",
+        "icon": "\U0001F693",          # police car
+        "color": "#b3bed4",
+        "width": 15.0,
+        "depth": 13.0,
+        "height": 10.0,
+        "footprint": 22.0,
+        "is_landmark": False,
+    },
+    BUILDING_LIBRARY: {
+        "label": "Library",
+        "icon": "\U0001F4DA",          # books
+        "color": "#dcc9b0",
+        "width": 17.0,
+        "depth": 14.0,
+        "height": 11.0,
+        "footprint": 24.0,
         "is_landmark": False,
     },
 }
@@ -202,11 +247,20 @@ VENUE_TYPES_BY_ACTIVITY = {
         BUILDING_GOVERNMENT_OFFICE,
         BUILDING_PARLIAMENT,
         BUILDING_PRESIDENTIAL_PALACE,
+        # Civic workplaces. `teacher`, `doctor` and `nurse` have existed in
+        # simulation/jobs.py since v0.1 with nowhere to go; now that these
+        # buildings are generated, a working citizen can be drawn at one.
+        BUILDING_SCHOOL,
+        BUILDING_COLLEGE,
+        BUILDING_HOSPITAL,
+        BUILDING_POLICE_STATION,
+        BUILDING_LIBRARY,
     ),
     "socializing": (
         BUILDING_SHOP,
         BUILDING_PARK_FEATURE,
         BUILDING_MONUMENT,
+        BUILDING_LIBRARY,
     ),
 }
 

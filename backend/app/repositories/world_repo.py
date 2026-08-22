@@ -153,11 +153,17 @@ def update_neighborhood(db: Session, neighborhood: Neighborhood, **fields) -> Ne
 # `cities` and `neighborhoods` have no population column on purpose (see the
 # docstring on models/city.py). These GROUP BY queries are the only way
 # population is ever reported, so it can't drift from reality.
+#
+# ALL THREE COUNT THE LIVING ONLY. Death is a soft flag — the row keeps its
+# `city_id` and `neighborhood_id` so the citizen's house stays theirs on the map —
+# which means an unfiltered count here would report a city population that never
+# falls. These numbers feed the map's city labels and the district panels, so they
+# have to agree with the dashboard's `population`, which is also living-only.
 
 def count_citizens_by_city(db: Session) -> dict[int, int]:
     rows = (
         db.query(Citizen.city_id, func.count(Citizen.id))
-        .filter(Citizen.city_id.isnot(None))
+        .filter(Citizen.city_id.isnot(None), Citizen.is_alive.is_(True))
         .group_by(Citizen.city_id)
         .all()
     )
@@ -167,7 +173,7 @@ def count_citizens_by_city(db: Session) -> dict[int, int]:
 def count_citizens_by_neighborhood(db: Session) -> dict[int, int]:
     rows = (
         db.query(Citizen.neighborhood_id, func.count(Citizen.id))
-        .filter(Citizen.neighborhood_id.isnot(None))
+        .filter(Citizen.neighborhood_id.isnot(None), Citizen.is_alive.is_(True))
         .group_by(Citizen.neighborhood_id)
         .all()
     )
@@ -175,12 +181,16 @@ def count_citizens_by_neighborhood(db: Session) -> dict[int, int]:
 
 
 def count_unassigned_citizens(db: Session) -> int:
-    """Citizens with no city yet. Expected to equal the whole population
+    """LIVING citizens with no city yet. Expected to equal the whole population
     until World Phase 2 runs the backfill — surfaced in the API so an empty
-    map reads as "not assigned yet" instead of looking like a bug."""
+    map reads as "not assigned yet" instead of looking like a bug.
+
+    Living-only for a second reason beyond consistency: this number is what tells
+    the admin "these people still need placing", and a deceased citizen will never
+    need placing."""
     return (
         db.query(func.count(Citizen.id))
-        .filter(Citizen.city_id.is_(None))
+        .filter(Citizen.city_id.is_(None), Citizen.is_alive.is_(True))
         .scalar()
         or 0
     )

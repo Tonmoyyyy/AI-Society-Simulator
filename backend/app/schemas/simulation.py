@@ -1,12 +1,16 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TickResult(BaseModel):
     tick_number: int
     citizens_processed: int
+    deaths: int = Field(
+        default=0,
+        description="Citizens who died of natural causes during this tick.",
+    )
     status: str
 
 

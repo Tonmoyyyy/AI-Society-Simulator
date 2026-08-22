@@ -6,8 +6,11 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_db, require_admin
 from app.models.user import User
 from app.schemas.world import (
+    BuildingCreate,
+    BuildingDeleteResultOut,
     BuildingOut,
     BuildingTypeOut,
+    BuildingUpdate,
     CityDetailOut,
     CityOut,
     CityUpdate,
@@ -24,7 +27,12 @@ from app.schemas.world import (
     WorldSeedResultOut,
     WorldSimulationOut,
 )
-from app.services import world_generation_service, world_service
+from app.services import (
+    building_admin_service,
+    world_generation_service,
+    world_service,
+)
+from app.services.building_admin_service import BuildingPlacementError
 from app.services.world_service import (
     BuildingNotFound,
     CityNotFound,
@@ -345,6 +353,12 @@ def generate_world(
     ever touches `buildings` and `roads` — cities, districts and their admin
     renames are never deleted.
 
+    Hand-placed buildings (`is_manual`, anything created or edited through
+    POST/PATCH /world/buildings) are never deleted either, and the layout planner
+    treats them as occupied ground: a generated house that would land on one is
+    dropped rather than moved. So a rebuild can leave slightly fewer citizens
+    housed than assigned — see `housed_citizens` in the response.
+
     Deterministic: the same cities, districts and citizens always produce the
     same layout, because every position is derived from a SHA-256-seeded RNG
     keyed on database ids rather than an unseeded `random`. A citizen's house
@@ -353,3 +367,112 @@ def generate_world(
     Returns zero counts plus an explanatory `detail` (not an error) when it
     declines to run, mirroring POST /seed."""
     return world_generation_service.generate_world(db, force=force)
+
+
+# ------------------------------------------------- admin building placement
+# The map's build mode (§21 groundwork): place a school by clicking on a
+# district, drag it somewhere better, bulldoze it again.
+#
+# WHY THESE LIVE IN building_admin_service AND NOT world_service
+# --------------------------------------------------------------
+# Same reason generation is its own service: these are the only routes in the
+# file that can write a `buildings` row from user input, and keeping their
+# validation in one small module means a bug in placement can't be reached by
+# anyone merely looking at the map.
+#
+# 409 vs 422: Pydantic rejects a malformed body (422). A body that is perfectly
+# well-formed but describes a building that would overlap the town hall, hang off
+# the edge of its district, or retype somebody's house is a CONFLICT with the
+# world's current state, so it comes back as 409 with a message naming the
+# obstruction.
+
+
+@router.post(
+    "/buildings", response_model=BuildingOut, status_code=status.HTTP_201_CREATED
+)
+def create_building(
+    payload: BuildingCreate,
+    allow_overlap: bool = Query(
+        default=False,
+        description="Skip the overlap check. District bounds are still enforced. Use when two buildings are meant to abut.",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Admin — place one building by hand.
+
+    Position may be given either as `offset_x`/`offset_z` (relative to the city
+    centre, which is how it is stored) or as `world_x`/`world_z` (absolute, which
+    is what a map click gives you); the service converts. `city_id` can be omitted
+    when `neighborhood_id` is given.
+
+    Size, height and `is_landmark` default to the type's own values from
+    GET /world/building-types, so placing a school needs nothing but a type and a
+    position.
+
+    The result is the full building in the same shape as
+    GET /world/buildings/{id}, so the map can add it to the scene without a second
+    request. It is flagged `is_manual`, which means POST /world/generate?force=true
+    will leave it standing."""
+    try:
+        return building_admin_service.create_building(
+            db, payload, allow_overlap=allow_overlap
+        )
+    except (CityNotFound, NeighborhoodNotFound) as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message)
+    except BuildingPlacementError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
+
+
+@router.patch("/buildings/{building_id}", response_model=BuildingOut)
+def update_building(
+    building_id: int,
+    payload: BuildingUpdate,
+    allow_overlap: bool = Query(
+        default=False,
+        description="Skip the overlap check. District bounds are still enforced.",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Admin — move, resize, rotate, rename, retype or re-district one building.
+
+    Every field is optional and omitting one leaves it alone; sending
+    `"name": null` clears the name, and `"neighborhood_id": null` moves the
+    building onto city land between districts.
+
+    `city_id` cannot be changed — offsets are relative to the city centre, so
+    re-parenting would teleport the building. Demolish and place a new one.
+
+    ANY successful edit marks the building `is_manual`, even if the generator
+    created it. Otherwise the move would look like it worked and then silently
+    revert on the next forced regeneration."""
+    try:
+        return building_admin_service.update_building(
+            db, building_id, payload, allow_overlap=allow_overlap
+        )
+    except (BuildingNotFound, CityNotFound, NeighborhoodNotFound) as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message)
+    except BuildingPlacementError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
+
+
+@router.delete("/buildings/{building_id}", response_model=BuildingDeleteResultOut)
+def delete_building(
+    building_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Admin — demolish one building.
+
+    A real delete, unlike a citizen's death: buildings carry no history worth
+    preserving. Works on generated buildings as well as hand-placed ones, but the
+    returned `detail` says so, because a generated building comes back on the next
+    `POST /world/generate?force=true` while a hand-placed one is gone for good.
+
+    If it was somebody's house, `former_owner_citizen_id` names them — their
+    marker falls back to the district centre until the world is regenerated."""
+    try:
+        return building_admin_service.delete_building(db, building_id)
+    except BuildingNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message)

@@ -18,9 +18,9 @@ merely viewing the map.
 --------------------------------------------------------------------------
 IDEMPOTENCE AND SAFETY
 --------------------------------------------------------------------------
-* `ensure_world_generated()` is a no-op the moment any building exists, exactly
-  like world_service.ensure_seed_world and simulation.seed_shops. That is what
-  makes it safe to call on every startup.
+* `ensure_world_generated()` is a no-op the moment any GENERATED building exists,
+  exactly like world_service.ensure_seed_world and simulation.seed_shops. That is
+  what makes it safe to call on every startup.
 * Regeneration requires `force=True` from an admin endpoint, and only ever
   deletes rows in `buildings` / `roads` — never a city, a district, a citizen,
   a shop, a wallet or a post.
@@ -28,6 +28,24 @@ IDEMPOTENCE AND SAFETY
   halfway through can't leave half a city standing.
 * Because placement is deterministic (see simulation/world_generator.py), a
   forced regeneration puts every house back exactly where it was.
+
+--------------------------------------------------------------------------
+HAND-PLACED BUILDINGS ARE NOT REGENERATED DATA
+--------------------------------------------------------------------------
+Everything above assumes `buildings` is derived output that can be recomputed.
+A building an admin placed through the map's build mode cannot be: no generator
+input describes it. Those rows carry `is_manual = True` and get three exemptions:
+
+  1. the forced delete skips them (`delete_generated_buildings`),
+  2. the planner is told to treat them as occupied ground, so nothing is rebuilt
+     on top of one (`plan_district_buildings(reserved=...)`),
+  3. "has the world been generated?" counts generated rows only, so an admin
+     placing a school on a freshly seeded world does not make startup believe the
+     world is already built.
+
+Everything else about them — how they render, how a citizen's marker finds a
+workplace in one, how the info panel describes them — is identical to a generated
+building. `is_manual` records who authored the row, nothing more.
 """
 
 from typing import Optional
@@ -39,18 +57,18 @@ from app.repositories import building_repo, citizen_repo, shop_repo, world_repo
 from app.simulation.building_types import (
     BUILDING_HOUSE,
     BUILDING_SHOP,
-    spec_for,
 )
 from app.simulation.world_generator import (
     HOUSING_DISTRICT_TYPES,
+    collides,
     distribute_citizens,
     grid_slots,
+    house_blueprint,
     house_footprint_for,
     housing_capacity,
     plan_city_roads,
     plan_district_buildings,
     plan_highways,
-    stable_rng,
 )
 from app.simulation.world_layout import DISTRICT_COMMERCIAL
 
@@ -91,10 +109,10 @@ def ensure_world_generated(db: Session) -> dict:
     """
     Generate the world's geometry if it hasn't been generated yet.
 
-    Called from the app lifespan on every boot; a single `count_buildings`
-    check makes it free after the first run.
+    Called from the app lifespan on every boot; a single
+    `count_generated_buildings` check makes it free after the first run.
     """
-    if building_repo.count_buildings(db) > 0:
+    if building_repo.count_generated_buildings(db) > 0:
         return {
             "created_buildings": 0,
             "created_roads": 0,
@@ -119,7 +137,10 @@ def generate_world(db: Session, force: bool = False) -> dict:
     deleted_buildings = 0
     deleted_roads = 0
 
-    if building_repo.count_buildings(db) > 0 or building_repo.count_roads(db) > 0:
+    # `count_generated_buildings`, not `count_buildings`: a world where an admin
+    # has hand-placed one school has NOT been generated, and counting their
+    # building here would refuse to ever lay out the roads and houses.
+    if building_repo.count_generated_buildings(db) > 0 or building_repo.count_roads(db) > 0:
         if not force:
             return {
                 "created_buildings": 0,
@@ -132,7 +153,12 @@ def generate_world(db: Session, force: bool = False) -> dict:
             }
         # commit=False: the wipe and the rebuild share one transaction, so a
         # failure mid-rebuild rolls the deletion back too.
-        deleted_buildings = building_repo.delete_all_buildings(db, commit=False)
+        #
+        # GENERATED ONLY. Hand-placed buildings (`is_manual`) are left standing and
+        # are fed back into the planner below as ground that is already taken. An
+        # admin's school is not recomputable from any generator input, so deleting
+        # it would destroy work that nothing could restore.
+        deleted_buildings = building_repo.delete_generated_buildings(db, commit=False)
         deleted_roads = building_repo.delete_all_roads(db, commit=False)
 
     cities = world_repo.list_cities(db)
@@ -154,7 +180,24 @@ def generate_world(db: Session, force: bool = False) -> dict:
 
     # ---- 1. place citizens into housing districts ----
     housing_districts = [d for d in districts if d.type in HOUSING_DISTRICT_TYPES]
-    citizens = citizen_repo.list_all(db)
+
+    # THE DEAD ARE INCLUDED HERE ON PURPOSE — the one place in the codebase that
+    # wants `include_dead=True`. Two reasons, and the first is the important one:
+    #
+    #   1. DETERMINISM. `distribute_citizens` allocates by position in the id list,
+    #      so dropping one citizen shifts every later citizen into a different
+    #      district. If the dead were excluded, a single death would silently
+    #      relocate the houses of everyone created after them on the next forced
+    #      regeneration — breaking this module's headline promise that regeneration
+    #      "puts every house back exactly where it was".
+    #   2. A dead citizen's house should keep standing and keep their name on it
+    #      (see `_owner_names` in world_service.py). Excluding them here would
+    #      demolish it.
+    #
+    # Nothing bad follows from it: the deceased get no MARKER on the map, because
+    # markers come from `list_world_citizens`, which is living-only, and they get
+    # no turns, because the tick engine filters separately. They just keep a house.
+    citizens = citizen_repo.list_all(db, include_dead=True)
     assignment = distribute_citizens(
         [c.id for c in citizens], [d.id for d in housing_districts]
     )
@@ -188,11 +231,41 @@ def generate_world(db: Session, force: bool = False) -> dict:
 
     # ---- 3. buildings ----
     created_buildings = 0
-    housed_citizens = 0
+
+    # What survived the delete: the hand-placed buildings. Read AFTER the delete so
+    # the list is exactly "what is still standing", and grouped by district because
+    # that is the granularity the planner works at. City-land manual buildings
+    # (neighborhood_id NULL) are not planned around — nothing is generated out
+    # there, so there is nothing to collide with.
+    manual_buildings = building_repo.list_manual_buildings(db)
+    manual_by_district: dict[int, list] = {}
+    for building in manual_buildings:
+        if building.neighborhood_id is not None:
+            manual_by_district.setdefault(building.neighborhood_id, []).append(building)
+
+    # A citizen who still owns a surviving building already has a home, so they
+    # must be skipped when owners are handed out below — otherwise they would end
+    # up owning two houses and `get_home_for_citizen` would silently pick one.
+    already_housed = {
+        b.owner_citizen_id for b in manual_buildings if b.owner_citizen_id is not None
+    }
+
+    # Counted up front rather than starting at zero, because the loop below
+    # deliberately skips these citizens and would otherwise report someone living
+    # in a hand-placed house as homeless.
+    housed_citizens = len(already_housed)
 
     for city in cities:
         for district in districts_by_city.get(city.id, []):
-            residents = citizens_by_district.get(district.id, [])
+            reserved = manual_by_district.get(district.id, [])
+
+            # Order-preserving filter, so the citizens who remain keep their
+            # relative positions and therefore their deterministic house slots.
+            residents = [
+                c
+                for c in citizens_by_district.get(district.id, [])
+                if c.id not in already_housed
+            ]
             district_shops = shops_by_district.get(district.id, [])
 
             blueprints = plan_district_buildings(
@@ -200,6 +273,7 @@ def generate_world(db: Session, force: bool = False) -> dict:
                 city_id=city.id,
                 house_count=len(residents),
                 shop_names=[s.name for s in district_shops],
+                reserved=reserved,
             )
 
             resident_cursor = 0
@@ -316,6 +390,14 @@ def assign_citizen_to_world(db: Session, citizen: Citizen) -> Optional[int]:
     The CALLER is responsible for swallowing exceptions — see
     citizen_service.create_citizen. Placement must never be able to stop a
     citizen from being created.
+
+    NOBODY INHERITS A HOUSE. `count_citizens_by_neighborhood` counts the living,
+    so a district whose residents have died reads as sparse and gets picked first —
+    but `list_unowned_houses` only returns houses with `owner_citizen_id IS NULL`,
+    and a deceased citizen still owns theirs. So the new arrival gets a NEW house
+    appended to the district grid rather than moving into a dead person's home.
+    That is intentional: there is no inheritance system here, matching the same
+    decision made for wallets in dashboard_service.get_stats.
     """
     districts = [d for d in world_repo.list_neighborhoods(db) if d.type in HOUSING_DISTRICT_TYPES]
     if not districts:
@@ -336,28 +418,48 @@ def assign_citizen_to_world(db: Session, citizen: Citizen) -> Optional[int]:
 
     # No empty house — extend the district by one. Re-planning the whole
     # district for one person would move everyone else's house, which the spec
-    # forbids, so the new house is appended at the next slot in the SAME
+    # forbids, so the new house is appended at the next FREE slot in the SAME
     # deterministic grid the generator used (same rng_key, same footprint
     # helper, capacity rounded the same coarse way).
-    existing = building_repo.list_buildings(
+    houses = building_repo.list_buildings(
         db, neighborhood_id=target.id, types=[BUILDING_HOUSE]
     )
-    wanted = housing_capacity(len(existing) + 1)
+    wanted = housing_capacity(len(houses) + 1)
 
     slots = grid_slots(
         target.width, target.depth, wanted, house_footprint_for(target.type),
         rng_key=f"district-{target.city_id}-{target.id}",
     )
-    if len(slots) <= len(existing):
+
+    # Every building in the district, not just the houses — a school or a police
+    # station occupies real ground and a new house must not be dropped on top of
+    # one (see world_generator.plan_civic_buildings).
+    occupied = building_repo.list_buildings(db, neighborhood_id=target.id)
+
+    # FIRST FREE SLOT, not the last slot.
+    #
+    # This used to take `slots[-1]`, which was wrong in a way that only showed up
+    # past a capacity boundary: `housing_capacity` rounds up to a multiple of 8, so
+    # a district with 9 houses and a district with 10 both ask for a 16-slot grid
+    # and both got handed slot 15 — the second house landed exactly on top of the
+    # first. Searching for a free slot fixes that and, in the same stroke, keeps
+    # houses off the civic buildings.
+    blueprint = None
+    for index, (slot_x, slot_z) in enumerate(slots):
+        candidate = house_blueprint(
+            target.city_id, target.id, index,
+            target.offset_x, target.offset_z, slot_x, slot_z,
+        )
+        if collides(candidate, occupied):
+            continue
+        blueprint = candidate
+        break
+
+    if blueprint is None:
         # District is genuinely full. The citizen still belongs to it (marker
         # renders at the district centre) — they just have no house yet.
         db.commit()
         return None
-
-    slot_x, slot_z = slots[-1]
-    rng = stable_rng("house", target.city_id, target.id, len(slots) - 1)
-    spec = spec_for(BUILDING_HOUSE)
-    wobble = rng.uniform(0.88, 1.14)
 
     building = building_repo.create_building(
         db,
@@ -365,12 +467,12 @@ def assign_citizen_to_world(db: Session, citizen: Citizen) -> Optional[int]:
         neighborhood_id=target.id,
         type=BUILDING_HOUSE,
         owner_citizen_id=citizen.id,
-        offset_x=target.offset_x + slot_x,
-        offset_z=target.offset_z + slot_z,
-        width=round(spec["width"] * wobble, 3),
-        depth=round(spec["depth"] * wobble, 3),
-        height=round(spec["height"] * rng.uniform(0.82, 1.26), 3),
-        rotation=round(rng.uniform(-0.09, 0.09), 4),
+        offset_x=blueprint["offset_x"],
+        offset_z=blueprint["offset_z"],
+        width=blueprint["width"],
+        depth=blueprint["depth"],
+        height=blueprint["height"],
+        rotation=blueprint["rotation"],
         is_landmark=False,
         commit=True,
     )

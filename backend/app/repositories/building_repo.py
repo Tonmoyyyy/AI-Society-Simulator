@@ -8,6 +8,15 @@ authored and renamed by an admin and must survive forever, while buildings and
 roads are derived output that a regeneration is allowed to delete and rebuild.
 Mixing "never delete this" and "safe to delete this" access in one module is how
 someone eventually wipes the wrong table.
+
+ONE EXCEPTION, AND IT IS THE REASON `is_manual` EXISTS
+-----------------------------------------------------
+A building an admin placed by hand through the map's build mode is authored, not
+derived — nothing can recompute it. Those rows carry `is_manual = True` and the
+regeneration path must skip them, which is why there are two delete functions
+(`delete_generated_buildings` and `delete_all_buildings`) rather than one, and why
+"has the world been generated?" is `count_generated_buildings`, not
+`count_buildings`.
 """
 
 from typing import Iterable, Optional
@@ -23,6 +32,35 @@ from app.models.road import Road
 
 def count_buildings(db: Session) -> int:
     return db.scalar(select(func.count()).select_from(Building)) or 0
+
+
+def count_generated_buildings(db: Session) -> int:
+    """Buildings the generator created, i.e. everything an admin did NOT place
+    by hand.
+
+    This — not `count_buildings` — is the right "has the world been generated
+    yet?" test. An admin who drops one school onto a freshly seeded world has not
+    generated the world, and if the check counted their building the startup path
+    would decide the world was already built and never lay out the roads or the
+    houses.
+    """
+    return (
+        db.scalar(
+            select(func.count()).select_from(Building).where(Building.is_manual.is_(False))
+        )
+        or 0
+    )
+
+
+def list_manual_buildings(
+    db: Session, city_id: Optional[int] = None
+) -> list[Building]:
+    """The hand-placed buildings, which are the rows a regeneration must NOT
+    delete and must plan around. Ordered by id, like every other list here."""
+    query = db.query(Building).filter(Building.is_manual.is_(True))
+    if city_id is not None:
+        query = query.filter(Building.city_id == city_id)
+    return query.order_by(Building.id).all()
 
 
 def get_building(db: Session, building_id: int) -> Optional[Building]:
@@ -115,6 +153,7 @@ def create_building(
     shop_id: Optional[int] = None,
     rotation: float = 0.0,
     is_landmark: bool = False,
+    is_manual: bool = False,
     commit: bool = True,
 ) -> Building:
     building = Building(
@@ -131,6 +170,7 @@ def create_building(
         height=height,
         rotation=rotation,
         is_landmark=is_landmark,
+        is_manual=is_manual,
     )
     db.add(building)
     if commit:
@@ -150,6 +190,31 @@ def update_building(db: Session, building: Building, **fields) -> Building:
     return building
 
 
+def write_building_fields(
+    db: Session, building: Building, fields: dict, commit: bool = True
+) -> Building:
+    """Writes EXACTLY what `fields` contains — including None.
+
+    The sibling of `update_building`, which skips None and therefore cannot
+    express "clear this column". The admin building editor needs both meanings:
+    a PATCH that omits `name` must leave the name alone, while a PATCH that sends
+    `"name": null` must erase it (and a building moved out of a district onto
+    city land genuinely has `neighborhood_id = NULL`).
+
+    Telling those two apart is the CALLER's job, and it is done the same way the
+    citizen editor does it: `payload.model_dump(exclude_unset=True)`, so an
+    omitted key never reaches this function in the first place. Passing a
+    `model_dump()` without `exclude_unset` here would blank every field the
+    client didn't mention.
+    """
+    for key, value in fields.items():
+        setattr(building, key, value)
+    if commit:
+        db.commit()
+        db.refresh(building)
+    return building
+
+
 def set_building_owner(
     db: Session, building: Building, citizen_id: Optional[int], commit: bool = True
 ) -> Building:
@@ -162,11 +227,47 @@ def set_building_owner(
     return building
 
 
+def delete_building(db: Session, building: Building, commit: bool = True) -> None:
+    """Demolish ONE building — the admin build mode's demolish action.
+
+    A real delete rather than a flag, unlike a citizen's death: a citizen has
+    posts, memories, a wallet and a place in the timeline that must survive them,
+    whereas a demolished building leaves nothing behind that anything else refers
+    to. `owner_citizen_id` and `shop_id` are the only inbound links and they live
+    on this row, so removing it cannot orphan anything.
+
+    A citizen whose house is demolished keeps their district, so their marker
+    still renders (at the district centre) — see world_service._serialize_world_citizen.
+    """
+    db.delete(building)
+    if commit:
+        db.commit()
+
+
 def delete_all_buildings(db: Session, commit: bool = True) -> int:
-    """Used only by the forced regeneration path. Returns the row count so the
-    API can report what it destroyed."""
+    """EVERY building, hand-placed ones included.
+
+    Not what the regeneration path wants — see `delete_generated_buildings`.
+    Kept for the case where an admin genuinely wants to start over.
+    """
     total = count_buildings(db)
     db.execute(delete(Building))
+    if commit:
+        db.commit()
+    return total
+
+
+def delete_generated_buildings(db: Session, commit: bool = True) -> int:
+    """Delete only what the generator created, leaving hand-placed rows standing.
+
+    This is what `world_generation_service.generate_world(force=True)` calls. The
+    rebuild that follows treats the survivors as obstacles it has to plan around,
+    so an admin's school is neither deleted nor buried under a new house.
+
+    Returns the row count so the API can report what it destroyed.
+    """
+    total = count_generated_buildings(db)
+    db.execute(delete(Building).where(Building.is_manual.is_(False)))
     if commit:
         db.commit()
     return total

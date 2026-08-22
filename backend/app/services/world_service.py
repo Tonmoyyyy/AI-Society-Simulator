@@ -231,6 +231,7 @@ def _serialize_building(
         "height": building.height,
         "rotation": building.rotation,
         "is_landmark": building.is_landmark,
+        "is_manual": building.is_manual,
         "owner_citizen_id": building.owner_citizen_id,
         "owner_name": owner_name,
         "shop_id": building.shop_id,
@@ -337,6 +338,14 @@ def _owner_names(db: Session, buildings: Iterable[Building]) -> dict[int, str]:
     Houses are stored with `name = NULL` on purpose (see models/building.py):
     a house's label is whatever its owner is called *right now*, so renaming a
     citizen renames their house on the map with no regeneration.
+
+    DELIBERATELY NOT FILTERED BY LIVENESS, unlike almost every other citizen query
+    in the codebase. A deceased citizen keeps their `city_id`/`neighborhood_id` and
+    keeps owning their house, so filtering here would silently turn every dead
+    person's home into an unlabelled box the moment they died. The citizen MARKER
+    disappears from the map (see `_citizen_markers` below) — the house stays, still
+    bearing their name. That is the intended reading: the person is gone, the
+    building they lived in is not.
     """
     owner_ids = {b.owner_citizen_id for b in buildings if b.owner_citizen_id is not None}
     if not owner_ids:
@@ -594,6 +603,12 @@ def list_world_citizens(
     for its own `buildings` key, which removes a second full scan of the table
     on the map's main request. Callers that don't have them (the standalone
     /world/citizens route) leave it None and this fetches them.
+
+    LIVING CITIZENS ONLY — that comes from `citizen_repo.list_all`, which filters
+    on `is_alive` by default. Do not replace it with a raw `db.query(Citizen)`: the
+    dead keep their rows and their `city_id`, so a raw query would leave a marker
+    standing on the map forever. Their HOUSE stays (see `_owner_names`); the marker
+    is what goes away.
     """
     if city_id is not None and world_repo.get_city(db, city_id) is None:
         raise CityNotFound(f"City {city_id} not found")
@@ -785,7 +800,11 @@ def get_world_overview(
         # payload is filtered to one city this now means "this city has
         # buildings", which is exactly what the map's "generate the world" hint
         # should key off. An unfiltered load is unchanged.
-        "world_generated": len(building_rows) > 0,
+        #
+        # GENERATED rows only. An admin who hand-places a school on a seeded but
+        # ungenerated world still needs to see the "generate the world" hint —
+        # their one building is not a city.
+        "world_generated": any(not b.is_manual for b in building_rows),
     }
 
 

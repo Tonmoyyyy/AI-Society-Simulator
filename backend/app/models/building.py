@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Float, Boolean, Integer, DateTime, ForeignKey, func
+from sqlalchemy import String, Float, Boolean, Integer, DateTime, ForeignKey, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -106,5 +106,20 @@ class Building(Base):
     # monuments). A column rather than a lookup on `type` so an admin can
     # promote any building to a landmark later.
     is_landmark: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Placed by hand through the admin build mode rather than by the generator.
+    #
+    # THIS IS WHAT MAKES A HAND-PLACED BUILDING PERMANENT. A forced regeneration
+    # deletes generated geometry and rebuilds it from the deterministic layout
+    # (see services/world_generation_service.py) — which would erase an admin's
+    # work, because no generator input describes it. So the delete filters on this
+    # flag, the regeneration treats surviving manual rows as obstacles it must
+    # plan around, and an authored building outlives every rebuild.
+    #
+    # Indexed: both halves of that dance filter on it. `default=` and
+    # `server_default=` must agree — same reasoning as models/government.py.
+    is_manual: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0"), index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
