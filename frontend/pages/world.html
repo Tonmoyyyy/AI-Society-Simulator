@@ -27,9 +27,8 @@
   map, so every addon path resolves from one entry.
 
   The version is pinned deliberately: an unpinned CDN range would let a future
-  Three.js release change API behaviour under a working map. Both entries below
-  must stay on the SAME version — mixing a core build with addons from another
-  release is how you get "THREE.X is not a constructor" at runtime.
+  Three.js release change API behaviour under a working map. This must stay in
+  sync with the version noted in static/js/world/scene.js.
 -->
 <script type="importmap">
 {

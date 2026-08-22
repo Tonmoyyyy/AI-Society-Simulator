@@ -22,14 +22,38 @@
 
   <div id="citizen-content" class="d-none">
 
+    <!--
+      Memorial banner. Shown only when is_alive === false. A deceased citizen's
+      profile still opens — recording a death must not erase the person — so this
+      banner is what tells you which kind of page you are looking at.
+    -->
+    <div id="memorial-banner" class="memorial-banner mb-3 d-none">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+          <div class="memorial-title">Deceased</div>
+          <div class="small" id="memorial-detail">—</div>
+        </div>
+        <button class="btn btn-sm btn-outline-asim" id="revive-btn">Undo — bring back</button>
+      </div>
+      <!-- Errors from Revive land here, next to the button that caused them. A
+           success needs no message: the banner itself disappears. -->
+      <div id="memorial-feedback" class="mt-2"></div>
+    </div>
+
     <!-- Header -->
-    <div class="asim-card mb-3">
+    <div class="asim-card mb-3" id="citizen-header-card">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
         <div class="d-flex align-items-center gap-3">
           <span id="c-avatar"></span>
           <div>
             <h1 class="h3 mb-1" id="c-name"></h1>
-            <p class="text-ink-soft mb-0"><span id="c-age"></span> years old · <span id="c-job"></span> · <span id="c-neighborhood"></span></p>
+            <p class="text-ink-soft mb-0">
+              <span id="c-age"></span> years old · <span id="c-gender"></span> ·
+              <span id="c-job"></span> · <span id="c-neighborhood"></span>
+            </p>
+            <p class="text-ink-faint small mb-0 mono">
+              National ID <span id="c-national-id">—</span> · record #<span id="c-id"></span>
+            </p>
           </div>
         </div>
         <span class="badge-activity" id="c-activity" style="font-size:0.78rem; padding:0.35rem 0.75rem;"></span>
@@ -76,34 +100,6 @@
         </div>
       </div>
 
-      <!-- Manage: assign job + send money -->
-      <div class="col-md-6">
-        <div class="asim-card h-100">
-          <h2 class="h6 mb-3">Manage</h2>
-          <div id="manage-login-notice" class="text-ink-faint small d-none">
-            <a href="login.html">Log in</a> to assign a job or send money for this citizen.
-          </div>
-          <div id="manage-controls">
-            <div id="manage-feedback" class="mb-2"></div>
-
-            <label class="form-label small text-ink-soft" for="assign-job-select">Job</label>
-            <div class="d-flex gap-2 mb-3">
-              <select class="form-select form-select-sm" id="assign-job-select">
-                <option value="unemployed">unemployed</option>
-              </select>
-              <button class="btn btn-sm btn-outline-asim" id="assign-job-btn">Save</button>
-            </div>
-
-            <label class="form-label small text-ink-soft">Send money to another citizen</label>
-            <div class="d-flex gap-2">
-              <input type="number" class="form-control form-control-sm" id="transfer-to-id" placeholder="Citizen ID" style="max-width:110px;" />
-              <input type="number" class="form-control form-control-sm" id="transfer-amount" placeholder="Amount" min="0.01" step="0.01" />
-              <button class="btn btn-sm btn-asim-amber" id="transfer-btn">Send</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Memories -->
       <div class="col-md-6">
         <div class="asim-card h-100">
@@ -111,6 +107,192 @@
           <div id="c-memories">
             <div class="text-ink-faint small">Loading…</div>
           </div>
+        </div>
+      </div>
+
+      <!--
+        Quick actions. The job dropdown that used to live here is now the Job
+        field of the profile editor below — one place to change a job, not two
+        that could disagree. Money transfer stays here because it isn't a profile
+        edit: it moves value between two citizens.
+      -->
+      <div class="col-md-6">
+        <div class="asim-card h-100">
+          <h2 class="h6 mb-3">Send money</h2>
+          <div id="manage-login-notice" class="text-ink-faint small d-none">
+            <a href="login.html">Log in</a> to send money on this citizen's behalf.
+          </div>
+          <div id="manage-controls">
+            <div id="manage-feedback" class="mb-2"></div>
+            <label class="form-label small text-ink-soft" for="transfer-to-id">To another citizen</label>
+            <div class="d-flex gap-2">
+              <input type="number" class="form-control form-control-sm" id="transfer-to-id" placeholder="Citizen ID" style="max-width:110px;" />
+              <input type="number" class="form-control form-control-sm" id="transfer-amount" placeholder="Amount" min="0.01" step="0.01" />
+              <button class="btn btn-sm btn-asim-amber" id="transfer-btn">Send</button>
+            </div>
+            <p class="text-ink-faint mb-0 mt-2" style="font-size:0.76rem;">
+              Use the record number shown in the header, not the National ID.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!--
+      ==================================================================
+      PROFILE EDITOR
+      ==================================================================
+      Everything about this citizen that can be customized, in one form.
+      Only CHANGED fields are sent (see buildChangedFields in the page
+      script) so saving cannot overwrite a value the tick engine updated
+      while the form sat open.
+
+      Deliberately absent: city / district. Relocating a citizen has to move
+      their house too or the 3D map draws the marker and the home in
+      different places — the backend refuses those fields for that reason.
+    -->
+    <div class="asim-card mt-3" id="editor-card">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+          <h2 class="h6 mb-1">Edit profile</h2>
+          <p class="text-ink-faint small mb-0">
+            Blank fields are left unchanged. Nothing is saved until you press Save.
+          </p>
+        </div>
+        <span class="text-ink-faint small" id="editor-dirty-note"></span>
+      </div>
+
+      <div id="editor-login-notice" class="text-ink-faint small d-none">
+        <a href="login.html">Log in</a> to edit this citizen.
+      </div>
+
+      <div id="editor-body">
+        <div id="editor-feedback" class="mb-2"></div>
+
+        <form id="profile-form">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small text-ink-soft" for="edit-name">Name</label>
+              <input type="text" class="form-control form-control-sm" id="edit-name" maxlength="100" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-ink-soft" for="edit-national-id">National ID</label>
+              <input type="text" class="form-control form-control-sm mono" id="edit-national-id"
+                     maxlength="24" pattern="[A-Za-z0-9\-]{3,24}"
+                     placeholder="AS-000001"
+                     title="3–24 characters: letters, digits or dashes" />
+              <div class="form-text" style="font-size:0.72rem;">
+                3–24 letters, digits or dashes. Must be unique. Stored uppercase.
+              </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+              <label class="form-label small text-ink-soft" for="edit-age">Age</label>
+              <input type="number" class="form-control form-control-sm" id="edit-age" min="0" max="120" />
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small text-ink-soft" for="edit-gender">Gender</label>
+              <select class="form-select form-select-sm" id="edit-gender"></select>
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small text-ink-soft" for="edit-job">Job</label>
+              <select class="form-select form-select-sm" id="edit-job">
+                <option value="unemployed">unemployed</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small text-ink-soft" for="edit-neighborhood">Neighborhood</label>
+              <select class="form-select form-select-sm" id="edit-neighborhood"></select>
+            </div>
+          </div>
+
+          <hr class="my-4" />
+
+          <div class="row g-4">
+            <div class="col-md-6">
+              <h3 class="h6 mb-1" style="font-size:0.82rem;">Personality</h3>
+              <p class="text-ink-faint mb-3" style="font-size:0.74rem;">
+                These are read on every decision — changing them changes how this
+                citizen behaves from the next tick onward.
+              </p>
+              <div id="edit-traits"></div>
+            </div>
+
+            <div class="col-md-6">
+              <h3 class="h6 mb-1" style="font-size:0.82rem;">Wellbeing</h3>
+              <p class="text-ink-faint mb-3" style="font-size:0.74rem;">
+                Health at or below the critical threshold means this citizen dies
+                of ill health on the next tick.
+              </p>
+              <div id="edit-wellbeing"></div>
+
+              <label class="form-label small text-ink-soft mt-2" for="edit-activity">Current activity</label>
+              <input type="text" class="form-control form-control-sm" id="edit-activity" maxlength="100" />
+              <div class="form-text" style="font-size:0.72rem;">
+                Cosmetic — the simulation reassigns this on the next tick.
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 mt-4 flex-wrap">
+            <button type="submit" class="btn btn-asim-primary" id="profile-save-btn">Save changes</button>
+            <button type="button" class="btn btn-outline-asim" id="profile-revert-btn">Revert</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!--
+      ==================================================================
+      DANGER ZONE
+      ==================================================================
+      Two genuinely different operations, kept visually apart so they are
+      not mistaken for each other:
+
+        Record death — soft. The row, wallet, posts, memories and timeline
+        all survive; the citizen stops counting as population, stops being
+        given turns, and loses any office. Reversible.
+
+        Delete permanently — hard. The row and everything cascading from
+        it are gone. For rows created by mistake, not for deaths.
+    -->
+    <div class="asim-card danger-card mt-3" id="danger-card">
+      <h2 class="h6 mb-1">Danger zone</h2>
+      <p class="text-ink-faint small mb-3">
+        Recording or undoing a death needs an admin account; permanent deletion needs
+        any logged-in account. The backend is what enforces that.
+      </p>
+
+      <div id="danger-login-notice" class="text-ink-faint small d-none">
+        <a href="login.html">Log in</a> to record a death or delete this record.
+      </div>
+
+      <div id="danger-body">
+        <div id="danger-feedback" class="mb-2"></div>
+
+        <div id="death-block">
+          <label class="form-label small text-ink-soft" for="death-cause">Record a death</label>
+          <div class="d-flex gap-2 flex-wrap">
+            <input type="text" class="form-control form-control-sm" id="death-cause"
+                   maxlength="100" placeholder="Cause — e.g. old age (optional)" style="max-width:320px;" />
+            <button class="btn btn-sm btn-outline-danger" id="record-death-btn">Record death</button>
+          </div>
+          <p class="text-ink-faint mb-0 mt-2" style="font-size:0.76rem;">
+            Keeps every post, purchase and memory. Vacates any office held. Reversible.
+          </p>
+        </div>
+
+        <hr class="my-3" />
+
+        <div>
+          <label class="form-label small text-ink-soft">Delete permanently</label>
+          <div>
+            <button class="btn btn-sm btn-outline-danger" id="delete-citizen-btn">Delete this record</button>
+          </div>
+          <p class="text-ink-faint mb-0 mt-2" style="font-size:0.76rem;">
+            Erases the citizen and everything attached to them. Cannot be undone —
+            use “Record death” for someone who died.
+          </p>
         </div>
       </div>
     </div>

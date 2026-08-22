@@ -232,13 +232,19 @@ a:hover { color: var(--ink); }
 .avatar-ring .avatar { border: 2px solid var(--glass-strong); }
 
 /* ---------- Stat cards ---------- */
+/* Deliberately NOT nested under `.stat-card`. These three classes are also used
+   standalone — the citizen profile's happiness/energy/health/mood tiles and the
+   roster's population strip put them straight inside an `.asim-card`, where a
+   `.stat-card .stat-label` selector matched nothing and the labels rendered as
+   plain body text. Anything wanting a smaller number overrides `font-size`
+   inline, which still wins over these. */
 
-.stat-card .stat-label {
+.stat-label {
   font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.09em;
   color: var(--ink-faint); margin-bottom: 0.4rem; font-weight: 600;
 }
-.stat-card .stat-value { font-size: 1.9rem; font-weight: 800; color: var(--ink); line-height: 1.1; font-family: var(--font-display); }
-.stat-card .stat-sub { font-size: 0.78rem; color: var(--ink-faint); margin-top: 0.3rem; }
+.stat-value { font-size: 1.9rem; font-weight: 800; color: var(--ink); line-height: 1.1; font-family: var(--font-display); }
+.stat-sub { font-size: 0.78rem; color: var(--ink-faint); margin-top: 0.3rem; }
 
 /* ---------- Buttons ---------- */
 
@@ -327,6 +333,10 @@ a:hover { color: var(--ink); }
 }
 .timeline-event.category-happiness::before { background: var(--danger); }
 .timeline-event.category-population::before { background: var(--status-working); }
+/* Deaths get a muted slate dot rather than a red one — red already means
+   "happiness crisis", and a death is a fact to record, not an alarm to raise. */
+.timeline-event.category-death::before { background: var(--ink-soft); }
+.timeline-event.category-death .event-title { color: var(--ink-soft); }
 .timeline-event .event-tick { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; }
 .timeline-event .event-title { font-family: var(--font-display); font-weight: 700; font-size: 1.02rem; margin: 0.15rem 0 0.2rem; }
 .timeline-event .event-desc { font-size: 0.88rem; color: var(--ink-soft); }
@@ -380,9 +390,51 @@ a:hover { color: var(--ink); }
 
 .text-ink-soft { color: var(--ink-soft); }
 .text-ink-faint { color: var(--ink-faint); }
+/* Lets a flex child shrink below its content width so long citizen names
+   ellipsize instead of pushing the buttons in a .product-row off the edge.
+   Bootstrap 5.3 has no min-width utility, hence the one-liner. */
+.min-width-0 { min-width: 0; }
 .text-accent { color: var(--accent-solid); }
 .text-brick, .text-danger-asim { color: var(--danger); }
 .empty-state { text-align: center; padding: 3rem 1rem; color: var(--ink-faint); }
+
+/* ---------- Deceased citizens ---------- */
+/* A death is a fact to record, not an alarm to raise — same reasoning as the
+   slate timeline dot. So the memorial treatment is desaturation and a quiet
+   slate rule, NOT the red used for errors and destructive buttons. Red here
+   would make every dead citizen's page look like something had gone wrong. */
+
+.memorial-banner {
+  background: rgba(84, 91, 104, 0.07);
+  border: 1px solid rgba(84, 91, 104, 0.18);
+  border-left: 3px solid var(--ink-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.8rem 1rem;
+  color: var(--ink-soft);
+}
+.memorial-banner .memorial-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+/* Applied to the header card and citizen cards of the deceased. Grayscale is
+   the whole signal: the avatar loses its color, so a cemetery page reads as one
+   at a glance even before the banner text is read. */
+.is-deceased .avatar,
+.is-deceased .avatar-ring { filter: grayscale(1); }
+.is-deceased .citizen-name, .is-deceased h1 { color: var(--ink-soft); }
+
+/* ---------- Danger zone ---------- */
+/* Tinted rather than outlined so it cannot be mistaken for another content
+   card while scrolling past it. */
+.danger-card {
+  background: linear-gradient(180deg, var(--danger-soft), var(--glass) 60%);
+  border-color: rgba(239, 90, 90, 0.28);
+}
+.danger-card h2 { color: var(--danger); }
 .alert-asim-error {
   background: var(--danger-soft); color: var(--danger);
   border: 1px solid rgba(239, 90, 90, 0.25); border-radius: var(--radius-sm);

@@ -28,6 +28,53 @@
 
   <div id="citizens-feedback" class="mb-3"></div>
 
+  <!--
+    Demographics strip. "How many men and women are in my society" answered from
+    GET /api/v1/citizens/demographics — counted server side on every request, so
+    it can't drift from the citizens table the way a cached tally would.
+    The gender tiles are rendered FROM the payload's `gender_breakdown`, not from
+    a hardcoded male/female pair, so a gender added backend-side appears here on
+    its own.
+  -->
+  <div class="asim-card mb-3" id="demographics-card">
+    <div class="d-flex justify-content-between align-items-baseline mb-2">
+      <h2 class="h6 mb-0">Population</h2>
+      <span class="text-ink-faint" style="font-size:0.74rem;" id="demo-avg-age">—</span>
+    </div>
+    <div class="row g-3" id="demo-strip">
+      <div class="col-12 text-ink-faint small">Counting…</div>
+    </div>
+  </div>
+
+  <!-- Roster filters. All three are applied server side so `total` and the
+       pagination stay honest — see the note on GET /api/v1/citizens. -->
+  <div class="asim-card mb-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label small text-ink-soft mb-1" for="filter-search">Search</label>
+        <input type="text" class="form-control form-control-sm" id="filter-search"
+               maxlength="100" placeholder="Name or National ID" />
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small text-ink-soft mb-1" for="filter-gender">Gender</label>
+        <select class="form-select form-select-sm" id="filter-gender">
+          <option value="">Any</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-4">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="filter-include-dead" />
+          <label class="form-check-label small" for="filter-include-dead">
+            Include deceased
+          </label>
+        </div>
+        <div class="text-ink-faint" style="font-size:0.72rem;">
+          Off by default, so “the population” means the living.
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="row g-3" id="citizens-grid">
     <div class="col-12 text-ink-faint">Loading citizens…</div>
   </div>
@@ -49,23 +96,43 @@
         <form id="customize-form">
           <div class="row g-2 mb-2">
             <div class="col-8">
-              <label class="form-label small text-ink-soft">Name (optional)</label>
+              <label class="form-label small text-ink-soft" for="cust-name">Name (optional)</label>
               <input type="text" class="form-control" id="cust-name" maxlength="100" placeholder="Randomized if blank" />
             </div>
             <div class="col-4">
-              <label class="form-label small text-ink-soft">Age</label>
+              <label class="form-label small text-ink-soft" for="cust-age">Age</label>
               <input type="number" class="form-control" id="cust-age" min="0" max="120" placeholder="Random" />
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label small text-ink-soft" for="cust-gender">Gender</label>
+              <select class="form-select" id="cust-gender">
+                <option value="">Random</option>
+              </select>
+              <div class="form-text" style="font-size:0.72rem;">
+                Picks a matching name if you left the name blank.
+              </div>
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-ink-soft" for="cust-national-id">National ID</label>
+              <input type="text" class="form-control mono" id="cust-national-id"
+                     maxlength="24" pattern="[A-Za-z0-9\-]{3,24}" placeholder="Issued automatically"
+                     title="3–24 characters: letters, digits or dashes" />
+              <div class="form-text" style="font-size:0.72rem;">
+                Leave blank unless you're importing an existing number.
+              </div>
             </div>
           </div>
           <div class="row g-2 mb-3">
             <div class="col-6">
-              <label class="form-label small text-ink-soft">Job</label>
+              <label class="form-label small text-ink-soft" for="cust-job">Job</label>
               <select class="form-select" id="cust-job">
                 <option value="">Random</option>
               </select>
             </div>
             <div class="col-6">
-              <label class="form-label small text-ink-soft">Neighborhood</label>
+              <label class="form-label small text-ink-soft" for="cust-neighborhood">Neighborhood</label>
               <select class="form-select" id="cust-neighborhood">
                 <option value="">Random</option>
               </select>
@@ -87,51 +154,13 @@
   </div>
 </div>
 
-<!-- Citizen detail modal -->
-<div class="modal fade" id="citizen-detail-modal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title font-display" id="detail-citizen-name">—</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="text-ink-faint small mb-3" id="detail-citizen-meta">—</p>
-
-        <div class="row g-2 mb-3">
-          <div class="col-4">
-            <div class="citizen-modal-stat">
-              <div class="label">Wallet</div>
-              <div class="value" id="detail-wallet">—</div>
-            </div>
-          </div>
-          <div class="col-4">
-            <div class="citizen-modal-stat">
-              <div class="label">Mood</div>
-              <div class="value" id="detail-mood">—</div>
-            </div>
-          </div>
-          <div class="col-4">
-            <div class="citizen-modal-stat">
-              <div class="label">Activity</div>
-              <div class="value" id="detail-activity" style="font-size:0.85rem;">—</div>
-            </div>
-          </div>
-        </div>
-
-        <h6 class="small text-uppercase text-ink-faint mb-2" style="letter-spacing:0.05em;">Recent purchases</h6>
-        <div id="detail-purchases" class="mb-3">
-          <div class="text-ink-faint small">Loading…</div>
-        </div>
-
-        <h6 class="small text-uppercase text-ink-faint mb-2" style="letter-spacing:0.05em;">Recent memories</h6>
-        <div id="detail-memories">
-          <div class="text-ink-faint small">Loading…</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+<!--
+  There is deliberately NO citizen detail modal here any more. Clicking a card
+  navigates to citizen.html, which is where the profile editor and the danger
+  zone live — a modal would have shown a read-only summary of the same citizen
+  and given two different-looking answers to "open this citizen". The old modal's
+  markup was left behind unfilled by the roster rewrite, so it is gone.
+-->
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="../static/js/config.js"></script>

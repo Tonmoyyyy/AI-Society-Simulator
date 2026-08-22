@@ -9,6 +9,10 @@ const AsimNav = (() => {
     { key: "dashboard", href: "dashboard.html", label: "Dashboard" },
     { key: "world", href: "world.html", label: "World" },
     { key: "citizens", href: "citizens.html", label: "Citizens" },
+    // The government console. Placed next to Citizens because appointing a
+    // President is a decision about a citizen, and the two pages link to each
+    // other constantly.
+    { key: "president", href: "president.html", label: "Government" },
     { key: "feed", href: "feed.html", label: "Feed" },
     { key: "shops", href: "shops.html", label: "Marketplace" },
     { key: "leaderboard", href: "leaderboard.html", label: "Leaderboard" },

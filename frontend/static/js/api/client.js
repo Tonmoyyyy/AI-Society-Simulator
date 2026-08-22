@@ -1,9 +1,7 @@
 // Thin fetch wrapper shared by every page. Handles:
 //  - attaching the stored Bearer token
 //  - parsing the backend's {"error": {"code": ..., "message": ...}} shape
-//    into a normal JS Error with a readable .message
-//  - redirecting to login on 401/403 for protected calls (never for public
-//    GETs — see requireAuth flag)
+//  - handling 401/403 errors gracefully without immediate logout loops
 
 const TOKEN_KEY = "asim_access_token";
 const USER_KEY = "asim_user_email";
@@ -35,16 +33,16 @@ const Auth = {
 
 /**
  * @param {string} path - e.g. "/api/v1/citizens"
- * @param {object} options - fetch options; extra flag `auth: true` attaches
- *   the Bearer token (needed for write endpoints).
+ * @param {object} options - fetch options
  */
 async function apiFetch(path, options = {}) {
-  const { auth = false, ...fetchOptions } = options;
+  const { auth = true, ...fetchOptions } = options;
   const headers = new Headers(fetchOptions.headers || {});
 
-  if (fetchOptions.body && !headers.has("Content-Type")) {
+  if (fetchOptions.body && !headers.has("Content-Type") && !(fetchOptions.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
+
   if (auth) {
     const token = Auth.getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -52,13 +50,15 @@ async function apiFetch(path, options = {}) {
 
   let response;
   try {
-    response = await fetch(`${window.ASIM_CONFIG.API_BASE}${path}`, {
+    const baseUrl = window.ASIM_CONFIG ? window.ASIM_CONFIG.API_BASE : "http://127.0.0.1:8000";
+    response = await fetch(`${baseUrl}${path}`, {
       ...fetchOptions,
       headers,
     });
   } catch (networkErr) {
+    console.error(`[API Fetch Network Error] Path: ${path}`, networkErr);
     throw new Error(
-      "Can't reach the backend. Is it running at " + window.ASIM_CONFIG.API_BASE + "?"
+      "Can't reach the backend. Is it running at " + (window.ASIM_CONFIG ? window.ASIM_CONFIG.API_BASE : "http://127.0.0.1:8000") + "?"
     );
   }
 
@@ -68,15 +68,16 @@ async function apiFetch(path, options = {}) {
   try {
     body = await response.json();
   } catch (_) {
-    // no JSON body (rare) — fall through, response.ok check below handles it
+    // Non-JSON response
   }
 
   if (!response.ok) {
+    // 401/403 এরর আসলে সরাসরি রিডাইরেক্ট না করে এরর থ্রো করা হচ্ছে
     if ((response.status === 401 || response.status === 403) && auth) {
-      Auth.clearSession();
-      window.location.href = "login.html";
-      return null;
+      const msg = (body && body.detail) || "Admin permissions required or token expired.";
+      throw new Error(`[${response.status}] ${msg}`);
     }
+
     const message =
       (body && body.error && body.error.message) ||
       (body && body.detail) ||

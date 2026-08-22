@@ -1,28 +1,7 @@
-/**
- * World / 3D map API client (World Phase 3).
- *
- * A classic <script> like every other api/*.js file — no build step, no import
- * statements — so it keeps working exactly like CitizensApi and DashboardApi.
- *
- * HOW THE ES MODULE REACHES THIS: `const WorldApi` is a global *lexical*
- * binding, so it is visible to later scripts but is NOT a property of `window`
- * (`window.WorldApi` is undefined). The world modules therefore just reference
- * `WorldApi` bare, which works because classic scripts run before deferred
- * modules — see the load-order comment in pages/world.html.
- *
- * Everything here is a thin wrapper over apiFetch. No shaping, no defaults, no
- * palette: the backend owns labels, icons and colours (GET /world/legend), so
- * adding a building type never requires touching the frontend.
- */
-const WorldApi = {
+window.WorldApi = {
   /**
    * The whole world in one request: cities, districts, buildings, roads,
    * citizen markers, government summary, simulation stats.
-   *
-   * @param {object} opts
-   * @param {number|null} opts.cityId        restrict to one city
-   * @param {boolean} opts.includeCitizens   false = terrain-only (fast) load
-   * @param {number|null} opts.citizenLimit  cap on returned markers
    */
   async overview({ cityId = null, includeCitizens = true, citizenLimit = null } = {}) {
     const params = new URLSearchParams();
@@ -54,8 +33,6 @@ const WorldApi = {
     const params = new URLSearchParams();
     if (cityId != null) params.set("city_id", cityId);
     if (neighborhoodId != null) params.set("neighborhood_id", neighborhoodId);
-    // `type` is a repeatable query param on the backend, hence append() in a
-    // loop rather than a comma-joined string.
     if (Array.isArray(types)) types.forEach((t) => params.append("type", t));
     const qs = params.toString();
     return apiFetch(`/api/v1/world/buildings${qs ? `?${qs}` : ""}`);
@@ -71,9 +48,7 @@ const WorldApi = {
   },
 
   /**
-   * Citizen markers for the current tick. This is the endpoint the map
-   * re-polls to move citizens between home and work, so it's deliberately
-   * separate from the full overview.
+   * Citizen markers for the current tick.
    */
   async citizens({ cityId = null, limit = null } = {}) {
     const params = new URLSearchParams();
@@ -90,7 +65,6 @@ const WorldApi = {
 
   /**
    * Header stats only (day, tick, population, happiness, latest event).
-   * Cheap enough to poll every tick, unlike overview().
    */
   async simulation() {
     return apiFetch("/api/v1/world/simulation");
@@ -129,3 +103,6 @@ const WorldApi = {
     });
   },
 };
+
+// Global lexical binding support
+var WorldApi = window.WorldApi;

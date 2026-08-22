@@ -2,10 +2,17 @@
   AsimNav.render("shops");
   AsimSocket.init();
 
+  // ATTRIBUTE-SAFE — see the same note in pages/citizens.js. The output goes
+  // into `data-shop-name="..."`, and the textContent/innerHTML trick does not
+  // escape quotes, so a shop name containing one would break out of it.
   function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
+    if (str == null) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function showFeedback(message, isError) {
