@@ -1,5 +1,7 @@
 # AI Society Simulator — Frontend (v0.1)
 
+http://127.0.0.1:5500/AI-Society-Simulator-main/frontend/pages/dashboard.html
+
 Plain HTML + CSS + vanilla JS + Bootstrap 5, per the approved v0.1 stack —
 no build tool, no npm install, no bundler. Open a terminal and go.
 

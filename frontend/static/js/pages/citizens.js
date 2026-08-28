@@ -259,7 +259,13 @@
     const filterGender = document.getElementById("filter-gender");
     try {
       const options = await CitizensApi.options();
-      (options.jobs || []).forEach((job) => {
+      
+      // Ensures thief & bhikkhuk are present even if backend API options response lags behind
+      const jobList = options.jobs || [];
+      if (!jobList.includes("thief")) jobList.push("thief");
+      if (!jobList.includes("bhikkhuk")) jobList.push("bhikkhuk");
+
+      jobList.forEach((job) => {
         const opt = document.createElement("option");
         opt.value = job;
         opt.textContent = job;
