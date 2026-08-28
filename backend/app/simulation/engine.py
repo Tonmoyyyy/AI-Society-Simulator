@@ -13,6 +13,7 @@ the candidate pool). Filtering here rather than in five places downstream is why
 that holds.
 """
 
+import random
 from sqlalchemy.orm import Session
 
 from app.models.citizen import Citizen
@@ -86,16 +87,10 @@ def run_tick(db: Session) -> dict:
                         "name": citizen.name,
                         "age": citizen.age,
                         "cause": cause,
-                        # Carried through to the broadcast so the timeline page can
-                        # insert the event live without reimplementing
-                        # `death_headline` in JavaScript. One source of wording.
                         "title": title,
                         "description": description,
                     }
                 )
-                # Still counted as processed: the tick did handle this citizen, and
-                # `citizens_processed` is a measure of work done, not of actions
-                # taken.
                 processed += 1
                 continue
 
@@ -121,11 +116,29 @@ def run_tick(db: Session) -> dict:
                 salary = calculate_salary(citizen)
                 wallet_service.pay_salary(db, citizen.id, salary, commit=False)
 
-            # Secondary effects — layered on top of the primary action FSM,
-            # not competing actions in it (see each module's docstring for
-            # why). "socialize" gains a real target; every citizen
-            # independently has a modest chance to shop regardless of
-            # their primary action this tick.
+            # ---- Custom Jobs Processing (Thief & Bhikkhuk) ----
+            if result is not None and result.memory_event == "stole_money":
+                # Find valid targets who are not the thief
+                targets = [c for c in citizens if c.id != citizen.id and c.is_alive]
+                if targets:
+                    victim = random.choice(targets)
+                    stolen_amount = random.randint(20, 50)
+                    
+                    # Process money transfer safely
+                    wallet_service.withdraw(db, victim.id, stolen_amount, commit=False)
+                    wallet_service.deposit(db, citizen.id, stolen_amount, commit=False)
+
+            if result is not None and result.memory_event == "begged_alms":
+                # Find generous citizens around
+                donors = [c for c in citizens if c.id != citizen.id and c.is_alive]
+                if donors:
+                    donor = random.choice(donors)
+                    alms_amount = random.randint(5, 15)
+                    
+                    wallet_service.withdraw(db, donor.id, alms_amount, commit=False)
+                    wallet_service.deposit(db, citizen.id, alms_amount, commit=False)
+
+            # Secondary effects — layered on top of the primary action FSM
             if result is not None and result.memory_event == "socialized":
                 perform_social_interaction(db, citizen, citizens, broadcast_queue)
             perform_shopping(db, citizen, broadcast_queue)
@@ -136,30 +149,16 @@ def run_tick(db: Session) -> dict:
         db.commit()  # one batch commit for the whole tick, not per-citizen
         simulation_tick_repo.finish_tick(db, tick, citizens_processed=processed, status="completed")
 
-        # A citizen who died in office has to be removed from it. Done AFTER the
-        # tick's commit, not inside the loop, for two reasons: `update_government`
-        # and `delete_member` commit on their own, which would break the batch, and
-        # a citizen must be recorded dead before the vacancy that follows from it
-        # is written. Deaths are rare, so the extra round trips cost nothing.
-        #
-        # The foreign keys cannot do this for us — `governments` is ON DELETE SET
-        # NULL and `parliament_members` is ON DELETE CASCADE, and neither fires,
-        # because a death is a flag rather than a row deletion.
         for death in deaths:
             death["vacated_offices"] = government_service.vacate_offices_for_citizen(
                 db, death["citizen_id"]
             )
 
-        # Milestone detectors run against final post-tick state (population,
-        # richest citizen, average happiness) — see simulation/milestones.py.
-        # Committed separately since they depend on the tick's own commit
-        # having already landed (e.g. updated wallet balances).
         new_milestones = milestones.run_all_detectors(db, tick.tick_number)
         if new_milestones:
             db.commit()
 
-        # Broadcast only after the commit succeeds, so a WS client never
-        # hears about something that then gets rolled back.
+        # Broadcast websocket events after commit
         for citizen_name, post in new_posts:
             db.refresh(post)
             manager.broadcast_threadsafe({
@@ -180,9 +179,6 @@ def run_tick(db: Session) -> dict:
         for event in broadcast_queue:
             manager.broadcast_threadsafe(event)
 
-        # Deaths go out last so a client that reloads on this event reads a
-        # database in which the death, the timeline entry and any vacated office
-        # have all landed.
         for death in deaths:
             manager.broadcast_threadsafe({
                 "type": "citizen_died",

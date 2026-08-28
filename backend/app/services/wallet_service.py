@@ -27,6 +27,62 @@ def get_balance(db: Session, citizen_id: int) -> Decimal:
     return wallet.balance
 
 
+def withdraw(db: Session, citizen_id: int, amount: Decimal, type_: str = "withdrawal", commit: bool = True):
+    """
+    Withdraws/Deducts money from a citizen's wallet.
+    Used by tick engine and other services for payments, fees, or taxes.
+    """
+    if amount <= 0:
+        raise WalletError("Withdrawal amount must be positive")
+
+    wallet = get_or_create_wallet(db, citizen_id, commit=commit)
+    target = wallet_repo.get_locked(db, wallet.id) if commit else wallet
+
+    if target.balance < amount:
+        if commit:
+            db.rollback()
+        raise InsufficientBalance(f"Citizen {citizen_id} has insufficient balance for withdrawal")
+
+    target.balance = target.balance - amount
+    db.add(target)
+
+    txn = wallet_repo.record_transaction(
+        db, from_wallet_id=target.id, to_wallet_id=None, amount=amount, type_=type_, commit=False
+    )
+
+    if commit:
+        db.commit()
+        db.refresh(target)
+        db.refresh(txn)
+
+    return txn
+
+
+def deposit(db: Session, citizen_id: int, amount: Decimal, type_: str = "deposit", commit: bool = True):
+    """
+    Deposits/Adds money to a citizen's wallet.
+    """
+    if amount <= 0:
+        raise WalletError("Deposit amount must be positive")
+
+    wallet = get_or_create_wallet(db, citizen_id, commit=commit)
+    target = wallet_repo.get_locked(db, wallet.id) if commit else wallet
+
+    target.balance = target.balance + amount
+    db.add(target)
+
+    txn = wallet_repo.record_transaction(
+        db, from_wallet_id=None, to_wallet_id=target.id, amount=amount, type_=type_, commit=False
+    )
+
+    if commit:
+        db.commit()
+        db.refresh(target)
+        db.refresh(txn)
+
+    return txn
+
+
 def pay_salary(db: Session, citizen_id: int, amount: Decimal, commit: bool = True):
     """Credits a citizen's wallet from the system (from_wallet_id=None) and
     writes a matching transaction row, atomically. Used by the tick engine's

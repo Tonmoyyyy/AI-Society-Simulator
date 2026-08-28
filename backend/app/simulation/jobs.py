@@ -16,6 +16,8 @@ JOB_BASE_SALARY = {
     "farmer": 60,
     "artist": 55,
     "banker": 2250,
+    "thief": 0,      # নিয়মিত কোনো বেতন নেই (চুরি থেকে আয় করবে)
+    "bhikkhuk": 10,  # প্রতিদিন খুব সামান্য সাহায্য পাওয়ার আনুমানিক হার
 }
 
 DEFAULT_BASE_SALARY = 60

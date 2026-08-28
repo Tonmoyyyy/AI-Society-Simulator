@@ -69,18 +69,13 @@ def _eat_execute(c: Citizen) -> ActionResult:
 
 
 def _work_is_valid(c: Citizen) -> bool:
-    return c.job != "unemployed" and c.energy > 20
+    # Standard jobs (excluding thief, bhikkhuk, unemployed)
+    special_jobs = {"unemployed", "thief", "bhikkhuk"}
+    return c.job not in special_jobs and c.energy > 20
 
 
 def _work_utility(c: Citizen) -> float:
     ambition = c.personality_json.get("ambition", 50)
-    # Previously included `+ energy * 0.2`, which made work artificially
-    # stronger the more rested a citizen was — since is_valid() already
-    # requires energy > 20, that term was redundant with sleep already
-    # handling low energy, and it caused a work<->sleep lockstep loop:
-    # citizens almost never had a real chance to socialize or post because
-    # work's utility spiked right after every sleep. Dropped entirely so
-    # ambition alone drives how much a citizen wants to work.
     return ambition * 0.7
 
 
@@ -97,6 +92,56 @@ def _work_execute(c: Citizen) -> ActionResult:
     )
 
 
+# ------------------------------------------------------------- Custom Jobs Logic
+
+def _steal_is_valid(c: Citizen) -> bool:
+    return c.job == "thief" and c.energy > 20
+
+
+def _steal_utility(c: Citizen) -> float:
+    # High ambition + low honesty drives high urge to steal
+    ambition = c.personality_json.get("ambition", 50)
+    honesty = c.personality_json.get("honesty", 50)
+    return (ambition * 0.6) + ((100 - honesty) * 0.4)
+
+
+def _steal_execute(c: Citizen) -> ActionResult:
+    c.energy = _clamp(c.energy - 20)
+    c.happiness = _clamp(c.happiness + 10)
+    c.mood = _clamp(c.mood - 0.1, lo=-1.0, hi=1.0)
+    c.current_activity = "stealing"
+    return ActionResult(
+        activity="stealing",
+        memory_event="stole_money",
+        memory_description=f"{c.name} executed a stealthy operation in the city.",
+        memory_importance=2,
+    )
+
+
+def _beg_is_valid(c: Citizen) -> bool:
+    return c.job == "bhikkhuk" and c.energy > 10
+
+
+def _beg_utility(c: Citizen) -> float:
+    # Low health/energy or low ambition drives begging
+    ambition = c.personality_json.get("ambition", 50)
+    return (100 - c.energy) * 0.5 + (100 - ambition) * 0.5
+
+
+def _beg_execute(c: Citizen) -> ActionResult:
+    c.energy = _clamp(c.energy - 10)
+    c.happiness = _clamp(c.happiness - 2)
+    c.current_activity = "begging"
+    return ActionResult(
+        activity="begging",
+        memory_event="begged_alms",
+        memory_description=f"{c.name} asked for alms near the public market.",
+        memory_importance=1,
+    )
+
+# -------------------------------------------------------------------------------
+
+
 def _socialize_is_valid(c: Citizen) -> bool:
     return c.energy > 15
 
@@ -104,12 +149,6 @@ def _socialize_is_valid(c: Citizen) -> bool:
 def _socialize_utility(c: Citizen) -> float:
     social = c.personality_json.get("social", 50)
     happiness_gap = 100 - c.happiness
-    # Bumped from 0.5/0.15 alongside the work-utility fix above (see its
-    # comment): with work no longer artificially spiking at high energy,
-    # socialize needs to be independently competitive rather than only
-    # winning in work's shadow. Verified via simulation: an average-trait
-    # employed citizen went from a 200-tick work<->sleep lockstep loop
-    # (0 socializes, 0 posts) to a mixed, lively action distribution.
     return social * 0.65 + happiness_gap * 0.2
 
 
@@ -134,10 +173,6 @@ def _post_is_valid(c: Citizen) -> bool:
 def _post_utility(c: Citizen) -> float:
     social = c.personality_json.get("social", 50)
     honesty = c.personality_json.get("honesty", 50)
-    # Sociable, expressive citizens post more often than quiet ones.
-    # (Weights tuned alongside _socialize_utility — see its comment —
-    # so create_post is a real contender, not a rare edge case, without
-    # flipping to dominate socialize instead.)
     return social * 0.45 + honesty * 0.15
 
 
@@ -157,6 +192,8 @@ ACTIONS: list[Action] = [
     Action("sleep", is_valid=lambda c: c.energy < 90, utility=_sleep_utility, execute=_sleep_execute),
     Action("eat", is_valid=lambda c: c.health < 90, utility=_eat_utility, execute=_eat_execute),
     Action("work", is_valid=_work_is_valid, utility=_work_utility, execute=_work_execute),
+    Action("steal", is_valid=_steal_is_valid, utility=_steal_utility, execute=_steal_execute),
+    Action("beg", is_valid=_beg_is_valid, utility=_beg_utility, execute=_beg_execute),
     Action("socialize", is_valid=_socialize_is_valid, utility=_socialize_utility, execute=_socialize_execute),
     Action("create_post", is_valid=_post_is_valid, utility=_post_utility, execute=_post_execute),
 ]
