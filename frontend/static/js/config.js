@@ -1,4 +1,4 @@
 window.ASIM_CONFIG = {
-  API_BASE: "http://127.0.0.1:8000",
-  WS_BASE: "ws://127.0.0.1:8000",
+  API_BASE: "https://ai-society-simulator-g3pj.onrender.com",
+  WS_BASE: "wss://ai-society-simulator-g3pj.onrender.com",
 };
